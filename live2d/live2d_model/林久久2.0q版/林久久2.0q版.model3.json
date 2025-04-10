@@ -1,0 +1,27 @@
+{
+	"Version": 3,
+	"FileReferences": {
+		"Moc": "林久久2.0q版.moc3",
+		"Textures": [
+			"林久久2.0q版.4096/texture_00.png",
+			"林久久2.0q版.4096/texture_01.png"
+		],
+		"Physics": "林久久2.0q版.physics3.json",
+		"DisplayInfo": "林久久2.0q版.cdi3.json"
+	},
+	"Groups": [
+		{
+			"Target": "Parameter",
+			"Name": "EyeBlink",
+			"Ids": [
+				"ParamEyeLOpen",
+				"ParamEyeROpen"
+			]
+		},
+		{
+			"Target": "Parameter",
+			"Name": "LipSync",
+			"Ids": []
+		}
+	]
+}

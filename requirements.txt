@@ -1,0 +1,36 @@
+# 基础依赖
+PyQt5==5.15.11
+PyQt-Fluent-Widgets==1.7.6
+PyOpenGL==3.1.9
+pypiwin32==223
+
+# Live2D相关
+live2d-py==0.3.6
+
+# 基础工具包
+pydantic
+mss==10.0.0
+
+# Web服务基础
+fastapi==0.115.8
+uvicorn
+flask
+flask-cors
+
+# 网络请求
+requests==2.32.3
+websocket-client==1.8.0
+websockets
+
+# 数据库基础
+sqlalchemy>=1.4.0
+redis>=4.0.0
+
+# ASR相关依赖
+funasr>=0.8.0
+faster-whisper>=0.10.0
+torch>=2.0.0
+numpy>=1.20.0
+soundfile>=0.10.3
+librosa>=0.8.0
+transformers>=4.30.0 
