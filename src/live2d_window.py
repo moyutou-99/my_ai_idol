@@ -14,6 +14,7 @@ import math
 from collections import deque
 from .live2d_parameters import Live2DParameters
 import requests
+from .chat_window import ChatWindowWidget
 
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
@@ -585,6 +586,51 @@ class Live2DModelWidget(QOpenGLWidget):
             expr_action.triggered.connect(lambda checked, name=expr_name: self.play_expression(name))
             expression_menu.addAction(expr_action)
         
+        # 添加聊天框控制选项
+        chat_area_menu = QMenu("聊天框", self)
+        chat_area_menu.setStyleSheet("""
+            QMenu {
+                background-color: rgba(255, 255, 255, 230);
+                border: 1px solid #ccc;
+                border-radius: 5px;
+            }
+            QMenu::item {
+                background-color: transparent;
+                padding: 5px 20px;
+            }
+            QMenu::item:selected {
+                background-color: rgba(240, 240, 240, 200);
+            }
+            QMenu::separator {
+                height: 1px;
+                background-color: #ccc;
+                margin: 5px 0px;
+            }
+        """)
+        menu.addMenu(chat_area_menu)
+
+        # 显示/隐藏聊天区域
+        show_chat_action = QAction("显示/隐藏聊天框", self)
+        show_chat_action.setCheckable(True)
+        # 通过QApplication.instance()获取主窗口
+        main_window = QApplication.instance().activeWindow()
+        if main_window and hasattr(main_window, 'chat_window'):
+            show_chat_action.setChecked(main_window.chat_window.show_chat_area)
+            show_chat_action.triggered.connect(main_window.chat_window.toggle_chat_area_visibility)
+        chat_area_menu.addAction(show_chat_action)
+
+        # 调整宽度
+        chat_width_action = QAction("调整宽度", self)
+        if main_window and hasattr(main_window, 'input_chat_area_width'):
+            chat_width_action.triggered.connect(main_window.input_chat_area_width)
+        chat_area_menu.addAction(chat_width_action)
+
+        # 调整高度
+        chat_height_action = QAction("调整高度", self)
+        if main_window and hasattr(main_window, 'input_chat_area_height'):
+            chat_height_action.triggered.connect(main_window.input_chat_area_height)
+        chat_area_menu.addAction(chat_height_action)
+        
         # 添加其他选项
         menu.addSeparator()
         close_action = QAction("关闭", self)
@@ -1003,6 +1049,15 @@ class Live2DWindow(QWidget):
         # 添加录音状态变量
         self.is_recording = False
         
+        # 创建聊天窗口
+        self.chat_window = ChatWindowWidget(self)
+        self.chat_window.setGeometry(100, 0, 300, 400)  # 初始位置在模型头部上方
+        self.chat_window.show()
+
+        # 连接发送按钮的信号
+        self.send_button.clicked.disconnect()  # 断开原有连接
+        self.send_button.clicked.connect(self.send_message_to_chat)
+        
         # 显示窗口
         self.show()
         self.input_container.show()  # 显示输入框容器
@@ -1047,11 +1102,14 @@ class Live2DWindow(QWidget):
         self.model_widget.close()
         # 关闭输入框容器
         self.input_container.close()
+        # 关闭聊天窗口
+        self.chat_window.close()
         # 关闭主窗口
         self.close()
         
     def on_model_moved(self, new_pos):
-        """当模型窗口移动时更新输入框位置"""
+        """当模型窗口移动时更新输入框和聊天框位置"""
+        # 更新输入框位置
         # 获取模型窗口的新位置和大小
         model_width = self.model_widget.width()
         model_height = self.model_widget.height()
@@ -1077,6 +1135,16 @@ class Live2DWindow(QWidget):
         # 确保输入框容器和输入框在最顶层
         self.input_container.raise_()
         self.input_box.raise_()
+        
+        # 更新聊天框位置
+        chat_width = self.chat_window.width()
+        
+        # 计算聊天框的新位置，使其水平居中于模型头部
+        new_chat_x = new_pos.x() + (model_width - chat_width) // 2
+        new_chat_y = new_pos.y() - self.chat_window.height() - 20  # 在模型头部上方20像素
+        
+        self.chat_window.move(new_chat_x, new_chat_y)
+        self.chat_window.raise_()
         
     def load_model(self, model_path):
         """加载Live2D模型"""
@@ -1340,6 +1408,8 @@ class Live2DWindow(QWidget):
         # 关闭模型窗口和输入框容器
         self.model_widget.close()
         self.input_container.close()
+        # 关闭聊天窗口
+        self.chat_window.close()
         super().closeEvent(event)
 
     def eventFilter(self, obj, event):
@@ -1359,4 +1429,46 @@ class Live2DWindow(QWidget):
                 # 输出调试信息
                 # print("焦点获取：输入框获得焦点")
                 return False
-        return super().eventFilter(obj, event) 
+        return super().eventFilter(obj, event)
+
+    def send_message_to_chat(self):
+        """发送消息到聊天框"""
+        message = self.input_box.toPlainText().strip()
+        if message:
+            # 添加用户消息到聊天框
+            self.chat_window.add_message(message, is_user=True)
+            # TODO: 在这里处理AI的回复
+            # 模拟AI回复
+            ai_reply = "收到你的消息：" + message
+            self.chat_window.add_message(ai_reply, is_user=False)
+            # 清空输入框
+            self.input_box.clear()
+
+    def input_chat_area_width(self):
+        """输入聊天区域宽度"""
+        width, ok = QInputDialog.getInt(
+            self,
+            "调整宽度",
+            "请输入宽度(像素):",
+            self.chat_window.chat_area['width'],
+            100,  # 最小值
+            800,  # 最大值
+            1  # 步长
+        )
+        if ok:
+            self.chat_window.set_chat_area_width(width)
+
+    def input_chat_area_height(self):
+        """输入聊天区域高度"""
+        height, ok = QInputDialog.getInt(
+            self,
+            "调整高度",
+            "请输入高度(像素):",
+            self.chat_window.chat_area['height'],
+            100,  # 最小值
+            600,  # 最大值
+            1  # 步长
+        )
+        if ok:
+            self.chat_window.set_chat_area_height(height)
+        
