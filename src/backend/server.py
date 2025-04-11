@@ -32,35 +32,19 @@ app.add_middleware(
 # 初始化录音器和语音识别器
 recorder = AudioRecorder(save_dir="data/recordings")
 model_manager = ModelManager()
-speech_recognizer = None
-
-# 默认语言设置
-DEFAULT_LANGUAGE = "zh-CN"
+speech_recognizer = SpeechRecognizer()  # 直接初始化，不再需要startup_event
 
 # 确保录音目录存在
 os.makedirs("data/recordings", exist_ok=True)
 
 @app.on_event("startup")
 async def startup_event():
-    """应用启动时初始化语音识别器"""
-    global speech_recognizer
-    try:
-        # 初始化语音识别器
-        speech_recognizer = SpeechRecognizer()
-        if speech_recognizer.initialize():
-            logger.info("语音识别器初始化成功")
-        else:
-            logger.error("语音识别器初始化失败")
-    except Exception as e:
-        logger.error(f"初始化语音识别器失败: {e}")
+    """应用启动时执行的操作"""
+    logger.info("服务器启动完成")
 
 @app.post("/api/start_recording")
-async def start_recording(language: Optional[str] = DEFAULT_LANGUAGE):
-    """开始录音
-    
-    Args:
-        language: 可选的语言代码，默认为中文（zh-CN）
-    """
+async def start_recording():
+    """开始录音"""
     try:
         success = recorder.start_recording()
         if success:
@@ -72,12 +56,8 @@ async def start_recording(language: Optional[str] = DEFAULT_LANGUAGE):
         return {"status": "error", "message": str(e)}
 
 @app.post("/api/stop_recording")
-async def stop_recording(language: Optional[str] = DEFAULT_LANGUAGE):
-    """停止录音并返回识别结果
-    
-    Args:
-        language: 可选的语言代码，默认为中文（zh-CN）
-    """
+async def stop_recording():
+    """停止录音并返回识别结果"""
     try:
         # 停止录音并获取文件路径
         file_path = recorder.stop_recording()
@@ -86,7 +66,7 @@ async def stop_recording(language: Optional[str] = DEFAULT_LANGUAGE):
         
         # 使用语音识别器识别音频
         if speech_recognizer:
-            text = speech_recognizer.recognize_file(file_path, language=language)
+            text = speech_recognizer.recognize_file(file_path)
             if text:
                 return {"status": "success", "text": text}
             else:
@@ -118,12 +98,8 @@ async def is_speaking():
         return {"status": "error", "message": str(e)}
 
 @app.get("/api/recognition_result")
-async def get_recognition_result(language: Optional[str] = DEFAULT_LANGUAGE):
-    """获取语音识别结果
-    
-    Args:
-        language: 可选的语言代码，默认为中文（zh-CN）
-    """
+async def get_recognition_result():
+    """获取语音识别结果"""
     try:
         if not recorder.is_recording:
             return {"status": "error", "message": "未在录音状态"}

@@ -6,6 +6,7 @@ import logging
 import numpy as np
 from funasr import AutoModel
 from funasr.utils.postprocess_utils import rich_transcription_postprocess
+from src.audio.model_manager import ModelManager
 
 class FunASRModel:
     """FunASR模型类，包含三个子模型：
@@ -20,42 +21,32 @@ class FunASRModel:
         Args:
             model_dir: 模型目录路径，如果为None则使用默认路径
         """
-        # 设置默认模型路径
-        self.model_dir = model_dir or "F:\\aivoice\\tools\\modelscope\\hub\\models\\asr"
+        # 初始化模型管理器
+        self.model_manager = ModelManager(model_dir)
         
-        # 设置三个子模型的路径
-        self.asr_model_path = os.path.join(self.model_dir, "speech_paraformer-large_asr_nat-zh-cn-16k-common-vocab8404-pytorch")
-        self.vad_model_path = os.path.join(self.model_dir, "speech_fsmn_vad_zh-cn-16k-common-pytorch")
-        self.punc_model_path = os.path.join(self.model_dir, "punc_ct-transformer_zh-cn-common-vocab272727-pytorch")
-        
-        # 检查模型路径是否存在
-        self._check_model_paths()
+        # 获取模型配置
+        model_config = self.model_manager.get_model_config("funasr")
+        if not model_config:
+            raise ValueError("无法获取FunASR模型配置")
+            
+        # 设置模型路径
+        self.asr_model_path = model_config["asr_model"]
+        self.vad_model_path = model_config["vad_model"]
+        self.punc_model_path = model_config["punc_model"]
         
         # 初始化模型
         self.model = None
         self.is_initialized = False
         self.device = "cuda" if os.environ.get("CUDA_VISIBLE_DEVICES") else "cpu"
         
+        # 流式识别配置
+        self.chunk_size = [0, 10, 5]  # [0, 10, 5] 600ms
+        self.encoder_chunk_look_back = 4
+        self.decoder_chunk_look_back = 1
+        
         # 初始化日志
         logging.basicConfig(level=logging.INFO)
         self.logger = logging.getLogger(__name__)
-        
-    def _check_model_paths(self):
-        """检查模型路径是否存在"""
-        if not os.path.exists(self.asr_model_path):
-            self.logger.warning(f"ASR模型路径不存在: {self.asr_model_path}")
-            self.logger.warning("将使用默认模型路径")
-            self.asr_model_path = "iic/speech_paraformer-large_asr_nat-zh-cn-16k-common-vocab8404-pytorch"
-            
-        if not os.path.exists(self.vad_model_path):
-            self.logger.warning(f"VAD模型路径不存在: {self.vad_model_path}")
-            self.logger.warning("将使用默认模型路径")
-            self.vad_model_path = "iic/speech_fsmn_vad_zh-cn-16k-common-pytorch"
-            
-        if not os.path.exists(self.punc_model_path):
-            self.logger.warning(f"标点符号模型路径不存在: {self.punc_model_path}")
-            self.logger.warning("将使用默认模型路径")
-            self.punc_model_path = "iic/punc_ct-transformer_zh-cn-common-vocab272727-pytorch"
         
     def initialize(self):
         """初始化模型"""
@@ -95,7 +86,7 @@ class FunASRModel:
             result = self.model.generate(
                 input=audio_file,
                 cache={},
-                language="auto",  # "zn", "en", "yue", "ja", "ko", "nospeech"
+                language="auto",
                 use_itn=True,
                 batch_size_s=60,
                 merge_vad=True,
@@ -110,11 +101,12 @@ class FunASRModel:
             self.logger.error(f"识别失败: {str(e)}")
             return None
             
-    def recognize_stream(self, audio_data):
+    def recognize_stream(self, audio_data, is_final=False):
         """识别音频流
         
         Args:
             audio_data: 音频数据，numpy数组格式
+            is_final: 是否为最后一个音频片段
             
         Returns:
             str: 识别结果文本
@@ -132,7 +124,11 @@ class FunASRModel:
             result = self.model.generate(
                 input=audio_data,
                 cache={},
-                language="auto",  # "zn", "en", "yue", "ja", "ko", "nospeech"
+                is_final=is_final,
+                chunk_size=self.chunk_size,
+                encoder_chunk_look_back=self.encoder_chunk_look_back,
+                decoder_chunk_look_back=self.decoder_chunk_look_back,
+                language="auto",
                 use_itn=True,
                 batch_size_s=60,
                 merge_vad=True,

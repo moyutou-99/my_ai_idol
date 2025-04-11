@@ -27,6 +27,13 @@ class AudioRecorder:
         self.vad_thread = None
         self.recognition_thread = None
         
+        # 获取并显示当前使用的麦克风信息
+        try:
+            default_input = self.audio.get_default_input_device_info()
+            logger.info(f"当前使用的麦克风: {default_input['name']}")
+        except Exception as e:
+            logger.error(f"获取麦克风信息失败: {e}")
+        
         # 创建保存目录
         if not os.path.exists(save_dir):
             os.makedirs(save_dir)
@@ -42,7 +49,7 @@ class AudioRecorder:
         self.volume_queue = queue.Queue()
         self.current_volume = 0
         self.silence_frames = 0
-        self.max_silence_frames = 30  # 约1秒的静音判定
+        self.max_silence_frames = 60  # 约2秒的静音判定
         
         # VAD状态
         self.is_speaking = False

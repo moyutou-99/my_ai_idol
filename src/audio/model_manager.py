@@ -19,12 +19,12 @@ class ModelManager:
         self.models = {
             "funasr": {
                 "name": "FunASR",
-                "local_path": "F:\\aivoice\\tools\\modelscope\\hub\\models\\asr",
+                "local_path": os.path.join(self.model_dir, "asr", "models", "models"),
                 "model_type": "funasr",
                 "config": {
-                    "asr_model": "speech_paraformer-large_asr_nat-zh-cn-16k-common-vocab8404-pytorch",
-                    "vad_model": "speech_fsmn_vad_zh-cn-16k-common-pytorch",
-                    "punc_model": "punc_ct-transformer_zh-cn-common-vocab272727-pytorch",
+                    "asr_model": os.path.join(self.model_dir, "asr", "models", "models", "speech_paraformer-large_asr_nat-zh-cn-16k-common-vocab8404-pytorch"),
+                    "vad_model": os.path.join(self.model_dir, "asr", "models", "models", "speech_fsmn_vad_zh-cn-16k-common-pytorch"),
+                    "punc_model": os.path.join(self.model_dir, "asr", "models", "models", "punc_ct-transformer_zh-cn-common-vocab272727-pytorch"),
                     "language": "auto",
                     "use_itn": True,
                     "batch_size_s": 60,
