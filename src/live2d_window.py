@@ -1,7 +1,7 @@
 import sys
 from PyQt5.QtWidgets import QOpenGLWidget, QMenu, QAction, QInputDialog, QTextEdit, QPushButton, QHBoxLayout, QWidget, QVBoxLayout, QApplication, QLabel
 from PyQt5.QtCore import QTimer, Qt, QPoint, QSize, pyqtSignal
-from PyQt5.QtGui import QPainter, QColor, QLinearGradient, QBrush, QGuiApplication, QCursor, QIcon
+from PyQt5.QtGui import QPainter, QColor, QLinearGradient, QBrush, QGuiApplication, QCursor, QIcon, QPen, QPainterPath
 from OpenGL.GL import *
 import live2d.v3 as live2d
 from live2d.v3 import StandardParams
@@ -14,6 +14,7 @@ import math
 from collections import deque
 from .live2d_parameters import Live2DParameters
 import requests
+import re
 
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
@@ -142,6 +143,14 @@ class Live2DModelWidget(QOpenGLWidget):
         self.chat_window = None
         self.chat_window_stay_on_top = True
         self.character_name = "久久"  # 默认角色名称
+        self.message_queue = []  # 添加消息队列
+        
+        # 对话气泡相关
+        self.speech_bubble = None  # 初始化为None
+        self.current_speech = None
+        self.speech_timer = QTimer()
+        self.speech_timer.timeout.connect(self._clear_speech)
+        self.speech_timer.setSingleShot(True)
         
     def initializeGL(self):
         """初始化OpenGL"""
@@ -280,6 +289,12 @@ class Live2DModelWidget(QOpenGLWidget):
             # 设置默认表情
             self.play_expression("normal")
             logger.info("默认表情设置成功")
+            
+            # 创建对话气泡
+            if self.speech_bubble is None:
+                self.speech_bubble = SpeechBubble()
+                self.speech_bubble.show()
+                self.speech_bubble.update_position(self.pos(), self.size())
             
         except Exception as e:
             logger.error(f"加载模型失败: {e}")
@@ -781,14 +796,23 @@ class Live2DModelWidget(QOpenGLWidget):
             self.moved.emit(new_pos)
             self.last_position = new_pos
             
+            # 更新气泡位置
+            if self.speech_bubble:
+                self.speech_bubble.update_position(new_pos, self.size())
+            
         super().moveEvent(event)
-
+        
     def close_model(self):
         """关闭模型和输入框"""
         # 关闭聊天窗口
         if self.chat_window:
             self.chat_window.close()  # 这里使用close而不是hide，因为模型窗口要完全关闭
             self.chat_window = None
+            
+        # 关闭对话气泡
+        if self.speech_bubble:
+            self.speech_bubble.close()
+            self.speech_bubble = None
             
         # 关闭模型窗口
         self.close()
@@ -874,6 +898,9 @@ class Live2DModelWidget(QOpenGLWidget):
         if self.chat_window is None:
             # 创建新的聊天窗口
             self.chat_window = ChatWindow()
+            # 显示所有历史消息
+            for sender, message in self.message_queue:
+                self.chat_window.add_message(sender, message)
             self.chat_window.show()
         else:
             if self.chat_window.isVisible():
@@ -891,13 +918,29 @@ class Live2DModelWidget(QOpenGLWidget):
             
     def add_chat_message(self, sender, message):
         """添加消息到聊天窗口"""
+        # 将消息添加到队列
+        self.message_queue.append((sender, message))
+        
+        # 如果聊天窗口存在，显示消息
         if self.chat_window:
             self.chat_window.add_message(sender, message)
-
+            
     def set_chat_font_size(self, size):
         """设置聊天窗口字体大小"""
         if self.chat_window:
             self.chat_window.set_font_size(size)
+
+    def _clear_speech(self):
+        """清除对话气泡内容"""
+        self.current_speech = None
+        self.speech_bubble.set_text("...")
+        
+    def show_speech(self, text, duration=5000):
+        """显示对话气泡"""
+        self.current_speech = text
+        self.speech_bubble.set_text(text)
+        self.speech_bubble.update_position(self.pos(), self.size())
+        self.speech_timer.start(duration)
 
 class Live2DWindow(QWidget):
     """主窗口，包含Live2D模型和输入框"""
@@ -919,7 +962,6 @@ class Live2DWindow(QWidget):
         self.input_container = QWidget(None)  # 不设置父窗口
         self.input_container.setWindowFlags(Qt.Window | Qt.Tool | Qt.WindowStaysOnTopHint | Qt.FramelessWindowHint)
         self.input_container.setAttribute(Qt.WA_TranslucentBackground)
-        # self.input_container.setStyleSheet("background-color: rgba(255, 0, 0, 100);")  # 红色背景
         
         # 初始化输入框位置，使其位于模型底部
         model_pos = self.model_widget.pos()
@@ -985,7 +1027,6 @@ class Live2DWindow(QWidget):
         # 创建按钮容器
         self.button_container = QWidget()
         self.button_container.setFixedWidth(70)
-        # self.button_container.setStyleSheet("background-color: rgba(0, 0, 255, 100);")  # 蓝色背景
         self.button_layout = QHBoxLayout(self.button_container)
         self.button_layout.setContentsMargins(0, 0, 0, 0)
         self.button_layout.setSpacing(5)
@@ -1078,20 +1119,6 @@ class Live2DWindow(QWidget):
     def close_input_container(self):
         """关闭输入框容器"""
         self.input_container.close()
-        
-    def close_model(self):
-        """关闭模型和输入框"""
-        # 关闭聊天窗口
-        if self.chat_window:
-            self.chat_window.close()  # 这里使用close而不是hide，因为模型窗口要完全关闭
-            self.chat_window = None
-            
-        # 关闭模型窗口
-        self.model_widget.close()
-        # 关闭输入框容器
-        self.input_container.close()
-        # 关闭主窗口
-        self.close()
         
     def on_model_moved(self, new_pos):
         """当模型窗口移动时更新输入框位置"""
@@ -1231,6 +1258,9 @@ class Live2DWindow(QWidget):
             # 添加自动回复
             reply_message = f"我已经接收到你的消息，你的消息是：{message}"
             self.model_widget.add_chat_message(self.model_widget.character_name, reply_message)
+            
+            # 在气泡中显示回复
+            self.model_widget.show_speech(reply_message)
             
             # TODO: 处理消息发送到后端
             self.input_box.clear()
@@ -1515,12 +1545,156 @@ class ChatWindow(QWidget):
         """设置字体大小"""
         self.font_size = size
         # 更新现有消息的字体大小
-        self.chat_area.setHtml(self.chat_area.toHtml().replace(
-            'font-size: \d+px;',
-            f'font-size: {size}px;'
-        ))
+        current_html = self.chat_area.toHtml()
+        updated_html = re.sub(r'font-size: \d+px;', f'font-size: {size}px;', current_html)
+        self.chat_area.setHtml(updated_html)
 
     def closeEvent(self, event):
         """重写关闭事件，使其只隐藏窗口而不是关闭"""
         event.ignore()  # 忽略关闭事件
-        self.hide()  # 隐藏窗口 
+        self.hide()  # 隐藏窗口
+
+class SpeechBubble(QWidget):
+    """对话气泡类"""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowFlags(Qt.Window | Qt.Tool | Qt.WindowStaysOnTopHint | Qt.FramelessWindowHint)
+        self.setAttribute(Qt.WA_TranslucentBackground)
+        
+        # 添加文字动画相关属性
+        self.current_text = ""
+        self.target_text = ""
+        self.animation_timer = QTimer()
+        self.animation_timer.timeout.connect(self._update_text_animation)
+        self.characters_per_update = 3  # 每次更新显示的字符数
+        
+        # 创建主布局
+        self.main_layout = QVBoxLayout(self)
+        self.main_layout.setContentsMargins(10, 10, 10, 10)
+        self.main_layout.setSpacing(0)
+        
+        # 创建文本标签
+        self.text_label = QLabel()
+        self.text_label.setWordWrap(True)
+        self.text_label.setAlignment(Qt.AlignCenter)
+        self.text_label.setStyleSheet("""
+            QLabel {
+                color: #333333;
+                font-size: 18px;
+                padding: 5px;
+            }
+        """)
+        
+        # 添加文本标签到布局
+        self.main_layout.addWidget(self.text_label)
+        
+        # 设置默认大小
+        self.setFixedSize(100, 50)
+        
+        # 设置默认文本
+        self.set_text("...")
+        
+    def set_text(self, text):
+        """设置气泡文本"""
+        self.target_text = text
+        self.current_text = ""
+        self.animation_timer.start(50)  # 每50毫秒更新一次
+        
+    def _update_text_animation(self):
+        """更新文字动画"""
+        if len(self.current_text) < len(self.target_text):
+            # 每次显示3-5个字符
+            chars_to_add = min(self.characters_per_update, len(self.target_text) - len(self.current_text))
+            self.current_text += self.target_text[len(self.current_text):len(self.current_text) + chars_to_add]
+            self.text_label.setText(self.current_text)
+            
+            # 根据文本长度调整气泡大小
+            self._adjust_bubble_size()
+        else:
+            self.animation_timer.stop()
+            
+    def _adjust_bubble_size(self):
+        """根据文本长度调整气泡大小"""
+        if self.current_text == "...":
+            # 默认小气泡大小
+            new_width = 100
+            new_height = 50
+            
+            # 获取当前气泡的中心点
+            current_center_x = self.x() + self.width() // 2
+            current_center_y = self.y() + self.height() // 2
+            
+            # 设置新的大小
+            self.setFixedSize(new_width, new_height)
+            
+            # 计算新的位置，使中心点保持不变
+            new_x = current_center_x - new_width // 2
+            new_y = current_center_y - new_height // 2
+            
+            # 移动气泡到新位置
+            self.move(new_x, new_y)
+            
+            # 重新计算并更新位置
+            if hasattr(self, 'parent') and self.parent():
+                model_pos = self.parent().pos()
+                model_size = self.parent().size()
+                self.update_position(model_pos, model_size)
+        else:
+            # 计算文本需要的宽度和高度
+            font_metrics = self.text_label.fontMetrics()
+            text_width = font_metrics.horizontalAdvance(self.current_text)
+            
+            # 设置气泡大小，留出边距
+            width = min(max(text_width + 40, 100), 300)  # 最小100，最大300
+            height = 100  # 固定高度为100像素（3行 × 18像素 + 16像素边距）
+            
+            # 获取当前气泡的中心点
+            current_center_x = self.x() + self.width() // 2
+            current_center_y = self.y() + self.height() // 2
+            
+            # 设置新的大小
+            self.setFixedSize(width, height)
+            
+            # 计算新的位置，使中心点保持不变
+            new_x = current_center_x - width // 2
+            new_y = current_center_y - height // 2
+            
+            # 移动气泡到新位置
+            self.move(new_x, new_y)
+            
+            # 重新计算并更新位置
+            if hasattr(self, 'parent') and self.parent():
+                model_pos = self.parent().pos()
+                model_size = self.parent().size()
+                self.update_position(model_pos, model_size)
+                
+    def update_position(self, model_pos, model_size):
+        """更新气泡位置"""
+        # 计算气泡位置，使其位于模型头顶，并向下偏移5像素
+        bubble_x = model_pos.x() + model_size.width() // 2 - self.width() // 2
+        bubble_y = model_pos.y() - self.height() - 5  # 向下偏移5像素
+        
+        # 设置气泡位置
+        self.move(bubble_x, bubble_y)
+
+    def paintEvent(self, event):
+        """绘制气泡形状"""
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        
+        # 设置气泡颜色为 #cab0f6
+        painter.setBrush(QBrush(QColor(202, 176, 246, 230)))
+        # 设置黑色实线边框，宽度为0.3
+        painter.setPen(QPen(QColor(0, 0, 0), 0.3))
+        
+        # 绘制圆角矩形
+        rect = self.rect().adjusted(5, 5, -5, -5)
+        painter.drawRoundedRect(rect, 10, 10)
+        
+        # 绘制小三角形
+        path = QPainterPath()
+        path.moveTo(rect.width() // 2 - 10, rect.height())
+        path.lineTo(rect.width() // 2, rect.height() + 10)
+        path.lineTo(rect.width() // 2 + 10, rect.height())
+        path.closeSubpath()
+        painter.drawPath(path) 
