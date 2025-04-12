@@ -14,7 +14,6 @@ import math
 from collections import deque
 from .live2d_parameters import Live2DParameters
 import requests
-from .chat_window import ChatWindowWidget
 
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
@@ -138,6 +137,11 @@ class Live2DModelWidget(QOpenGLWidget):
                 "folder": ""
             }
         }
+        
+        # 聊天窗口相关
+        self.chat_window = None
+        self.chat_window_stay_on_top = True
+        self.character_name = "久久"  # 默认角色名称
         
     def initializeGL(self):
         """初始化OpenGL"""
@@ -515,9 +519,9 @@ class Live2DModelWidget(QOpenGLWidget):
         
         menu.addSeparator()
         
-        # 添加点击区域控制选项
-        click_area_menu = QMenu("点击区域", self)
-        click_area_menu.setStyleSheet("""
+        # 添加聊天窗口控制选项
+        chat_menu = QMenu("聊天窗口", self)
+        chat_menu.setStyleSheet("""
             QMenu {
                 background-color: rgba(255, 255, 255, 230);
                 border: 1px solid #ccc;
@@ -536,6 +540,40 @@ class Live2DModelWidget(QOpenGLWidget):
                 margin: 5px 0px;
             }
         """)
+        menu.addMenu(chat_menu)
+        
+        # 打开/关闭聊天窗口
+        toggle_chat_action = QAction("打开/关闭聊天窗口", self)
+        toggle_chat_action.triggered.connect(self.toggle_chat_window)
+        chat_menu.addAction(toggle_chat_action)
+        
+        # 置顶/取消置顶聊天窗口
+        stay_on_top_action = QAction("置顶聊天窗口", self)
+        stay_on_top_action.setCheckable(True)
+        stay_on_top_action.setChecked(self.chat_window_stay_on_top)
+        stay_on_top_action.triggered.connect(self.toggle_chat_window_stay_on_top)
+        chat_menu.addAction(stay_on_top_action)
+        
+        # 添加字体大小设置子菜单
+        font_size_menu = QMenu("字体大小", self)
+        font_size_menu.setStyleSheet(chat_menu.styleSheet())
+        chat_menu.addMenu(font_size_menu)
+        
+        # 添加字体大小选项
+        font_sizes = [12, 14, 16, 18, 20]
+        for size in font_sizes:
+            font_size_action = QAction(f"{size}px", self)
+            font_size_action.setCheckable(True)
+            if self.chat_window and self.chat_window.font_size == size:
+                font_size_action.setChecked(True)
+            font_size_action.triggered.connect(lambda checked, s=size: self.set_chat_font_size(s))
+            font_size_menu.addAction(font_size_action)
+        
+        menu.addSeparator()
+        
+        # 添加点击区域控制选项
+        click_area_menu = QMenu("点击区域", self)
+        click_area_menu.setStyleSheet(chat_menu.styleSheet())
         menu.addMenu(click_area_menu)
         
         # 显示/隐藏点击区域
@@ -559,25 +597,7 @@ class Live2DModelWidget(QOpenGLWidget):
         
         # 添加表情控制选项
         expression_menu = QMenu("表情控制", self)
-        expression_menu.setStyleSheet("""
-            QMenu {
-                background-color: rgba(255, 255, 255, 230);
-                border: 1px solid #ccc;
-                border-radius: 5px;
-            }
-            QMenu::item {
-                background-color: transparent;
-                padding: 5px 20px;
-            }
-            QMenu::item:selected {
-                background-color: rgba(240, 240, 240, 200);
-            }
-            QMenu::separator {
-                height: 1px;
-                background-color: #ccc;
-                margin: 5px 0px;
-            }
-        """)
+        expression_menu.setStyleSheet(chat_menu.styleSheet())
         menu.addMenu(expression_menu)
         
         # 添加每个表情选项
@@ -586,51 +606,6 @@ class Live2DModelWidget(QOpenGLWidget):
             expr_action.triggered.connect(lambda checked, name=expr_name: self.play_expression(name))
             expression_menu.addAction(expr_action)
         
-        # 添加聊天框控制选项
-        chat_area_menu = QMenu("聊天框", self)
-        chat_area_menu.setStyleSheet("""
-            QMenu {
-                background-color: rgba(255, 255, 255, 230);
-                border: 1px solid #ccc;
-                border-radius: 5px;
-            }
-            QMenu::item {
-                background-color: transparent;
-                padding: 5px 20px;
-            }
-            QMenu::item:selected {
-                background-color: rgba(240, 240, 240, 200);
-            }
-            QMenu::separator {
-                height: 1px;
-                background-color: #ccc;
-                margin: 5px 0px;
-            }
-        """)
-        menu.addMenu(chat_area_menu)
-
-        # 显示/隐藏聊天区域
-        show_chat_action = QAction("显示/隐藏聊天框", self)
-        show_chat_action.setCheckable(True)
-        # 通过QApplication.instance()获取主窗口
-        main_window = QApplication.instance().activeWindow()
-        if main_window and hasattr(main_window, 'chat_window'):
-            show_chat_action.setChecked(main_window.chat_window.show_chat_area)
-            show_chat_action.triggered.connect(main_window.chat_window.toggle_chat_area_visibility)
-        chat_area_menu.addAction(show_chat_action)
-
-        # 调整宽度
-        chat_width_action = QAction("调整宽度", self)
-        if main_window and hasattr(main_window, 'input_chat_area_width'):
-            chat_width_action.triggered.connect(main_window.input_chat_area_width)
-        chat_area_menu.addAction(chat_width_action)
-
-        # 调整高度
-        chat_height_action = QAction("调整高度", self)
-        if main_window and hasattr(main_window, 'input_chat_area_height'):
-            chat_height_action.triggered.connect(main_window.input_chat_area_height)
-        chat_area_menu.addAction(chat_height_action)
-        
         # 添加其他选项
         menu.addSeparator()
         close_action = QAction("关闭", self)
@@ -638,25 +613,7 @@ class Live2DModelWidget(QOpenGLWidget):
         menu.addAction(close_action)
         
         # 设置主菜单样式
-        menu.setStyleSheet("""
-            QMenu {
-                background-color: rgba(255, 255, 255, 230);
-                border: 1px solid #ccc;
-                border-radius: 5px;
-            }
-            QMenu::item {
-                background-color: transparent;
-                padding: 5px 20px;
-            }
-            QMenu::item:selected {
-                background-color: rgba(240, 240, 240, 200);
-            }
-            QMenu::separator {
-                height: 1px;
-                background-color: #ccc;
-                margin: 5px 0px;
-            }
-        """)
+        menu.setStyleSheet(chat_menu.styleSheet())
         
         # 显示菜单
         menu.exec(pos)
@@ -828,6 +785,11 @@ class Live2DModelWidget(QOpenGLWidget):
 
     def close_model(self):
         """关闭模型和输入框"""
+        # 关闭聊天窗口
+        if self.chat_window:
+            self.chat_window.close()  # 这里使用close而不是hide，因为模型窗口要完全关闭
+            self.chat_window = None
+            
         # 关闭模型窗口
         self.close()
         # 发出关闭信号，通知主窗口关闭输入框
@@ -907,6 +869,36 @@ class Live2DModelWidget(QOpenGLWidget):
         self.click_area['x'] = (self.width() - self.click_area['width']) // 2
         self.click_area['y'] = (self.height() - self.click_area['height']) // 2
         
+    def toggle_chat_window(self):
+        """切换聊天窗口的显示状态"""
+        if self.chat_window is None:
+            # 创建新的聊天窗口
+            self.chat_window = ChatWindow()
+            self.chat_window.show()
+        else:
+            if self.chat_window.isVisible():
+                # 如果窗口可见，则隐藏它
+                self.chat_window.hide()
+            else:
+                # 如果窗口不可见，则显示它
+                self.chat_window.show()
+            
+    def toggle_chat_window_stay_on_top(self):
+        """切换聊天窗口的置顶状态"""
+        self.chat_window_stay_on_top = not self.chat_window_stay_on_top
+        if self.chat_window:
+            self.chat_window.toggle_stay_on_top(self.chat_window_stay_on_top)
+            
+    def add_chat_message(self, sender, message):
+        """添加消息到聊天窗口"""
+        if self.chat_window:
+            self.chat_window.add_message(sender, message)
+
+    def set_chat_font_size(self, size):
+        """设置聊天窗口字体大小"""
+        if self.chat_window:
+            self.chat_window.set_font_size(size)
+
 class Live2DWindow(QWidget):
     """主窗口，包含Live2D模型和输入框"""
     def __init__(self):
@@ -1049,15 +1041,6 @@ class Live2DWindow(QWidget):
         # 添加录音状态变量
         self.is_recording = False
         
-        # 创建聊天窗口
-        self.chat_window = ChatWindowWidget(self)
-        self.chat_window.setGeometry(100, 0, 300, 400)  # 初始位置在模型头部上方
-        self.chat_window.show()
-
-        # 连接发送按钮的信号
-        self.send_button.clicked.disconnect()  # 断开原有连接
-        self.send_button.clicked.connect(self.send_message_to_chat)
-        
         # 显示窗口
         self.show()
         self.input_container.show()  # 显示输入框容器
@@ -1098,18 +1081,20 @@ class Live2DWindow(QWidget):
         
     def close_model(self):
         """关闭模型和输入框"""
+        # 关闭聊天窗口
+        if self.chat_window:
+            self.chat_window.close()  # 这里使用close而不是hide，因为模型窗口要完全关闭
+            self.chat_window = None
+            
         # 关闭模型窗口
         self.model_widget.close()
         # 关闭输入框容器
         self.input_container.close()
-        # 关闭聊天窗口
-        self.chat_window.close()
         # 关闭主窗口
         self.close()
         
     def on_model_moved(self, new_pos):
-        """当模型窗口移动时更新输入框和聊天框位置"""
-        # 更新输入框位置
+        """当模型窗口移动时更新输入框位置"""
         # 获取模型窗口的新位置和大小
         model_width = self.model_widget.width()
         model_height = self.model_widget.height()
@@ -1135,16 +1120,6 @@ class Live2DWindow(QWidget):
         # 确保输入框容器和输入框在最顶层
         self.input_container.raise_()
         self.input_box.raise_()
-        
-        # 更新聊天框位置
-        chat_width = self.chat_window.width()
-        
-        # 计算聊天框的新位置，使其水平居中于模型头部
-        new_chat_x = new_pos.x() + (model_width - chat_width) // 2
-        new_chat_y = new_pos.y() - self.chat_window.height() - 20  # 在模型头部上方20像素
-        
-        self.chat_window.move(new_chat_x, new_chat_y)
-        self.chat_window.raise_()
         
     def load_model(self, model_path):
         """加载Live2D模型"""
@@ -1250,7 +1225,14 @@ class Live2DWindow(QWidget):
         """发送消息"""
         message = self.input_box.toPlainText().strip()
         if message:
-            # TODO: 处理消息发送
+            # 将消息发送到聊天窗口
+            self.model_widget.add_chat_message("我", message)
+            
+            # 添加自动回复
+            reply_message = f"我已经接收到你的消息，你的消息是：{message}"
+            self.model_widget.add_chat_message(self.model_widget.character_name, reply_message)
+            
+            # TODO: 处理消息发送到后端
             self.input_box.clear()
             
     def adjust_input_height(self):
@@ -1408,8 +1390,6 @@ class Live2DWindow(QWidget):
         # 关闭模型窗口和输入框容器
         self.model_widget.close()
         self.input_container.close()
-        # 关闭聊天窗口
-        self.chat_window.close()
         super().closeEvent(event)
 
     def eventFilter(self, obj, event):
@@ -1431,44 +1411,116 @@ class Live2DWindow(QWidget):
                 return False
         return super().eventFilter(obj, event)
 
-    def send_message_to_chat(self):
-        """发送消息到聊天框"""
-        message = self.input_box.toPlainText().strip()
-        if message:
-            # 添加用户消息到聊天框
-            self.chat_window.add_message(message, is_user=True)
-            # TODO: 在这里处理AI的回复
-            # 模拟AI回复
-            ai_reply = "收到你的消息：" + message
-            self.chat_window.add_message(ai_reply, is_user=False)
-            # 清空输入框
-            self.input_box.clear()
-
-    def input_chat_area_width(self):
-        """输入聊天区域宽度"""
-        width, ok = QInputDialog.getInt(
-            self,
-            "调整宽度",
-            "请输入宽度(像素):",
-            self.chat_window.chat_area['width'],
-            100,  # 最小值
-            800,  # 最大值
-            1  # 步长
-        )
-        if ok:
-            self.chat_window.set_chat_area_width(width)
-
-    def input_chat_area_height(self):
-        """输入聊天区域高度"""
-        height, ok = QInputDialog.getInt(
-            self,
-            "调整高度",
-            "请输入高度(像素):",
-            self.chat_window.chat_area['height'],
-            100,  # 最小值
-            600,  # 最大值
-            1  # 步长
-        )
-        if ok:
-            self.chat_window.set_chat_area_height(height)
+class ChatWindow(QWidget):
+    """聊天窗口类"""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        # 移除左上角标题
+        self.setWindowTitle(" ")
+        self.setGeometry(100, 100, 400, 500)  # 初始窗口大小
+        # 设置窗口标志，只保留关闭按钮
+        self.setWindowFlags(Qt.Window | Qt.WindowStaysOnTopHint | Qt.WindowCloseButtonHint)
+        # 设置窗口图标
+        icon_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "assets", "icons", "7.png")
+        self.setWindowIcon(QIcon(icon_path))
+        self.setStyleSheet("""
+            QWidget {
+                background-color: #cab0f6;  /* 淡紫色背景 */
+            }
+            QTextEdit {
+                border: 1px solid #ccc;
+                border-radius: 5px;
+                padding: 5px;
+                font-size: 14px;
+            }
+        """)
         
+        # 创建主布局
+        self.main_layout = QVBoxLayout(self)
+        self.main_layout.setContentsMargins(10, 10, 10, 10)
+        self.main_layout.setSpacing(5)
+        
+        # 创建标题栏
+        self.title_bar = QWidget()
+        self.title_bar.setFixedHeight(40)
+        self.title_bar.setStyleSheet("""
+            QWidget {
+                background-color: #f0f0f0;
+                border: 1px solid #ccc;
+                border-radius: 5px;
+            }
+        """)
+        
+        # 创建标题布局
+        self.title_layout = QHBoxLayout(self.title_bar)
+        self.title_layout.setContentsMargins(5, 0, 5, 0)
+        
+        # 创建标题标签
+        self.title_label = QLabel("聊天框")
+        self.title_label.setAlignment(Qt.AlignCenter)
+        self.title_label.setStyleSheet("""
+            QLabel {
+                font-size: 18px;
+                font-weight: bold;
+                color: #a686dc;
+            }
+        """)
+        
+        # 添加标题标签到标题布局
+        self.title_layout.addWidget(self.title_label)
+        
+        # 创建聊天区域
+        self.chat_area = QTextEdit()
+        self.chat_area.setReadOnly(True)
+        self.chat_area.setStyleSheet("""
+            QTextEdit {
+                background-color: white;
+                border: 1px solid #ccc;
+                border-radius: 5px;
+            }
+        """)
+        
+        # 添加组件到主布局
+        self.main_layout.addWidget(self.title_bar)
+        self.main_layout.addWidget(self.chat_area)
+        
+        # 设置窗口可调整大小
+        self.setMinimumSize(300, 400)
+        
+        # 初始化字体大小
+        self.font_size = 14
+        
+    def add_message(self, sender, message):
+        """添加消息到聊天区域"""
+        # 格式化消息，设置角色名称颜色为 #514485
+        formatted_message = f'<b><span style="color: #514485; font-size: {self.font_size}px;">{sender}：</span></b><span style="font-size: {self.font_size}px;">{message}</span><br>'
+        
+        # 添加消息
+        self.chat_area.append(formatted_message)
+        
+        # 滚动到底部
+        self.chat_area.verticalScrollBar().setValue(
+            self.chat_area.verticalScrollBar().maximum()
+        )
+        
+    def toggle_stay_on_top(self, stay_on_top):
+        """切换窗口置顶状态"""
+        if stay_on_top:
+            self.setWindowFlags(self.windowFlags() | Qt.WindowStaysOnTopHint)
+        else:
+            self.setWindowFlags(self.windowFlags() & ~Qt.WindowStaysOnTopHint)
+        self.show()
+        
+    def set_font_size(self, size):
+        """设置字体大小"""
+        self.font_size = size
+        # 更新现有消息的字体大小
+        self.chat_area.setHtml(self.chat_area.toHtml().replace(
+            'font-size: \d+px;',
+            f'font-size: {size}px;'
+        ))
+
+    def closeEvent(self, event):
+        """重写关闭事件，使其只隐藏窗口而不是关闭"""
+        event.ignore()  # 忽略关闭事件
+        self.hide()  # 隐藏窗口 
