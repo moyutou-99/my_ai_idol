@@ -7,11 +7,13 @@ from pathlib import Path
 import json
 import asyncio
 from typing import Optional
+import torch
 
 # 导入自定义模块
 from src.audio.audio_recorder import AudioRecorder
 from src.audio.speech_recognition import SpeechRecognizer
 from src.audio.model_manager import ModelManager
+from src.llm.models import ModelManager as LLMModelManager  # 导入LLM模型管理器
 
 # 配置日志
 logging.basicConfig(level=logging.INFO)
@@ -33,6 +35,14 @@ app.add_middleware(
 recorder = AudioRecorder(save_dir="data/recordings")
 model_manager = ModelManager()
 speech_recognizer = SpeechRecognizer()  # 直接初始化，不再需要startup_event
+
+# 初始化LLM模型管理器
+llm_manager = LLMModelManager(
+    local_model_path="Voice_models/Qwen2.5-1.5B-Instruct",
+    api_key=None,  # 如果需要使用API，请设置API密钥
+    device="cuda" if torch.cuda.is_available() else "cpu",
+    torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32
+)
 
 # 确保录音目录存在
 os.makedirs("data/recordings", exist_ok=True)
@@ -119,8 +129,36 @@ async def get_recognition_result():
 @app.post("/api/chat")
 async def chat(message: str = Form(...)):
     """处理聊天请求（LLM模块）"""
-    # 这里将来会实现LLM功能
-    return {"status": "not_implemented", "message": "LLM模块尚未实现"}
+    try:
+        logger.info(f"收到聊天请求，消息长度: {len(message)}")
+        
+        # 检查模型是否已加载
+        if not hasattr(llm_manager, 'local_model') or llm_manager.local_model.model is None:
+            logger.info("模型未加载，尝试加载模型...")
+            await llm_manager.local_model.load_model()
+            
+        # 使用LLM模型生成回复
+        logger.info("开始生成回复...")
+        response = await llm_manager.get_response(message)
+        
+        if response:
+            logger.info(f"成功生成回复，长度: {len(response)}")
+            return {
+                "status": "success",
+                "message": response
+            }
+        else:
+            logger.error("LLM模型返回空响应")
+            return {
+                "status": "error",
+                "message": "生成回复失败，请检查模型是否正确加载"
+            }
+    except Exception as e:
+        logger.error(f"处理聊天请求失败: {str(e)}", exc_info=True)
+        return {
+            "status": "error",
+            "message": f"生成回复失败: {str(e)}"
+        }
 
 # 为TTS模块预留的接口
 @app.post("/api/tts")

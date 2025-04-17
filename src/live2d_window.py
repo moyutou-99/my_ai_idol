@@ -1255,14 +1255,34 @@ class Live2DWindow(QWidget):
             # 将消息发送到聊天窗口
             self.model_widget.add_chat_message("我", message)
             
-            # 添加自动回复
-            reply_message = f"我已经接收到你的消息，你的消息是：{message}"
-            self.model_widget.add_chat_message(self.model_widget.character_name, reply_message)
+            # 发送消息到后端LLM模块
+            try:
+                response = requests.post(
+                    "http://127.0.0.1:8000/api/chat",
+                    data={"message": message}
+                )
+                
+                if response.status_code == 200:
+                    data = response.json()
+                    if data["status"] == "success":
+                        # 添加LLM的回复到聊天窗口
+                        self.model_widget.add_chat_message(self.model_widget.character_name, data["message"])
+                        # 在气泡中显示回复
+                        self.model_widget.show_speech(data["message"])
+                    else:
+                        error_msg = f"错误：{data['message']}"
+                        self.model_widget.add_chat_message("系统", error_msg)
+                        self.model_widget.show_speech(error_msg)
+                else:
+                    error_msg = "与服务器通信失败"
+                    self.model_widget.add_chat_message("系统", error_msg)
+                    self.model_widget.show_speech(error_msg)
+            except Exception as e:
+                error_msg = f"发送消息失败：{str(e)}"
+                self.model_widget.add_chat_message("系统", error_msg)
+                self.model_widget.show_speech(error_msg)
             
-            # 在气泡中显示回复
-            self.model_widget.show_speech(reply_message)
-            
-            # TODO: 处理消息发送到后端
+            # 清空输入框
             self.input_box.clear()
             
     def adjust_input_height(self):
