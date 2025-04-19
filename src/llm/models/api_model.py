@@ -1,8 +1,9 @@
 import os
 import aiohttp
-from typing import Optional
-from ..base import BaseLLM
+from typing import Optional, Tuple
+from ..base import BaseLLM, EmotionType, LLMConfig
 import json
+import re
 
 class ApiLLM(BaseLLM):
     def __init__(self, api_type: str = "deepseek", api_key: str = None):
@@ -24,11 +25,14 @@ class ApiLLM(BaseLLM):
         """生成回复"""
         try:
             async with aiohttp.ClientSession() as session:
+                # 格式化提示词
+                formatted_prompt = LLMConfig.format_prompt(prompt)
+                
                 # 根据API类型构建不同的请求数据
                 if self.api_type == "deepseek":
                     data = {
                         "model": "deepseek-chat",
-                        "messages": [{"role": "user", "content": prompt}],
+                        "messages": [{"role": "user", "content": formatted_prompt}],
                         "temperature": 0.7,
                         "max_tokens": 512,
                         "stream": False,
@@ -37,7 +41,7 @@ class ApiLLM(BaseLLM):
                 elif self.api_type == "ph":
                     data = {
                         "model": "ph-chat",
-                        "messages": [{"role": "user", "content": prompt}],
+                        "messages": [{"role": "user", "content": formatted_prompt}],
                         "temperature": 0.7,
                         "max_tokens": 512,
                         "stream": False,
@@ -52,9 +56,12 @@ class ApiLLM(BaseLLM):
                     if response.status == 200:
                         result = await response.json()
                         if self.api_type == "deepseek":
-                            return result["choices"][0]["message"]["content"]
+                            content = result["choices"][0]["message"]["content"]
                         elif self.api_type == "ph":
-                            return result["choices"][0]["message"]["content"]
+                            content = result["choices"][0]["message"]["content"]
+                            
+                        # 使用LLMConfig处理输出
+                        return LLMConfig.process_output(content)
                     else:
                         error_text = await response.text()
                         raise Exception(f"API请求失败: {response.status} - {error_text}")
@@ -66,11 +73,14 @@ class ApiLLM(BaseLLM):
         """流式生成回复"""
         try:
             async with aiohttp.ClientSession() as session:
+                # 格式化提示词
+                formatted_prompt = LLMConfig.format_prompt(prompt)
+                
                 # 根据API类型构建不同的请求数据
                 if self.api_type == "deepseek":
                     data = {
                         "model": "deepseek-chat",
-                        "messages": [{"role": "user", "content": prompt}],
+                        "messages": [{"role": "user", "content": formatted_prompt}],
                         "temperature": 0.7,
                         "max_tokens": 512,
                         "stream": True,
@@ -79,7 +89,7 @@ class ApiLLM(BaseLLM):
                 elif self.api_type == "ph":
                     data = {
                         "model": "ph-chat",
-                        "messages": [{"role": "user", "content": prompt}],
+                        "messages": [{"role": "user", "content": formatted_prompt}],
                         "temperature": 0.7,
                         "max_tokens": 512,
                         "stream": True,
@@ -92,6 +102,8 @@ class ApiLLM(BaseLLM):
                     json=data
                 ) as response:
                     if response.status == 200:
+                        full_content = ""
+                        current_emotion = EmotionType.NORMAL
                         async for line in response.content:
                             if line:
                                 try:
@@ -100,12 +112,20 @@ class ApiLLM(BaseLLM):
                                         if "choices" in json_line and len(json_line["choices"]) > 0:
                                             delta = json_line["choices"][0].get("delta", {})
                                             if "content" in delta:
-                                                yield delta["content"]
+                                                content = delta["content"]
+                                                full_content += content
+                                                # 使用LLMConfig处理流式输出
+                                                formatted_content, current_emotion = await LLMConfig.process_stream_output(content, current_emotion)
+                                                yield formatted_content
                                     elif self.api_type == "ph":
                                         if "choices" in json_line and len(json_line["choices"]) > 0:
                                             delta = json_line["choices"][0].get("delta", {})
                                             if "content" in delta:
-                                                yield delta["content"]
+                                                content = delta["content"]
+                                                full_content += content
+                                                # 使用LLMConfig处理流式输出
+                                                formatted_content, current_emotion = await LLMConfig.process_stream_output(content, current_emotion)
+                                                yield formatted_content
                                 except json.JSONDecodeError:
                                     continue
                     else:

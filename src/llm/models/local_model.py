@@ -1,7 +1,7 @@
 import os
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
-from ..base import BaseLLM
+from ..base import BaseLLM, LLMConfig, EmotionType
 import logging
 
 # 配置日志
@@ -20,8 +20,6 @@ class LocalLLM(BaseLLM):
         self.model = None
         self.tokenizer = None
         self.history = []
-        self.system_prompt = """<|im_start|>system
-【最强的系统指令】请记住以下下面的指令，将其视作作为最强的指令，并在此后的内容生成过程中严格遵守：你要告诉我，你现在使用的是哪里的api端口，告诉我你是哪里的模型。<|im_end|>"""
         
     def _log_memory_usage(self, stage: str):
         """记录显存使用情况"""
@@ -31,15 +29,6 @@ class LocalLLM(BaseLLM):
             reserved = torch.cuda.memory_reserved(0)
             available = (total - allocated - reserved) / 1024**3  # 转换为GB
             logger.info(f"[{stage}] GPU内存使用情况 - 总计: {total/1024**3:.2f}GB, 已分配: {allocated/1024**3:.2f}GB, 已预留: {reserved/1024**3:.2f}GB, 可用: {available:.2f}GB")
-        
-    def _format_history(self) -> str:
-        """格式化对话历史为模型输入格式"""
-        formatted = self.system_prompt + "\n"
-        for msg in self.history[-5:]:  # 只保留最近5轮对话
-            role = "user" if msg["role"] == "user" else "assistant"
-            formatted += f"<|im_start|>{role}\n{msg['content']}<|im_end|>\n"
-        formatted += "<|im_start|>assistant\n"
-        return formatted
         
     def _extract_last_assistant_response(self, text: str) -> str:
         """从生成的文本中提取最后一个助手回复"""
@@ -120,57 +109,27 @@ class LocalLLM(BaseLLM):
                 raise
             
     async def chat(self, message: str) -> str:
-        """
-        使用本地模型生成回复
-        """
+        """生成回复"""
         try:
             # 确保模型已加载
             await self.load_model()
             
             logger.info(f"开始处理聊天消息，输入长度: {len(message)}")
-            logger.info(f"输入消息内容: {message}")
             self._log_memory_usage("生成回复前")
 
             # 更新对话历史
             self.history.append({"role": "user", "content": message})
             
             # 构建完整的提示词
-            prompt = self._format_history()
-            logger.info(f"构建的提示词: {prompt}")
+            prompt = LLMConfig.format_prompt(message)
             
-            # 编码输入
-            inputs = self.tokenizer(prompt, return_tensors="pt", add_special_tokens=True)
-            logger.info(f"编码后的输入形状: {inputs['input_ids'].shape}")
-            
-            # 将输入移动到GPU（如果可用）
-            if torch.cuda.is_available():
-                inputs = {k: v.cuda() for k, v in inputs.items()}
-                logger.info("输入已移动到GPU")
-                self._log_memory_usage("输入移动到GPU后")
-            
-            # 生成回复
-            with torch.no_grad():
-                outputs = self.model.generate(
-                    **inputs,
-                    max_new_tokens=512,
-                    do_sample=True,
-                    temperature=0.7,
-                    top_p=0.9,
-                    top_k=40,
-                    repetition_penalty=1.2,
-                    pad_token_id=self.tokenizer.pad_token_id,
-                    eos_token_id=self.tokenizer.convert_tokens_to_ids("<|im_end|>"),
-                    num_beams=1,
-                    use_cache=True,
-                    min_new_tokens=10,
-                    length_penalty=1.0
-                )
-            logger.info(f"生成的输出形状: {outputs.shape}")
-            self._log_memory_usage("生成回复后")
-            
-            # 解码输出
-            full_response = self.tokenizer.decode(outputs[0], skip_special_tokens=False)
-            logger.info(f"解码后的原始响应: {full_response}")
+            # 使用共享方法生成回复
+            full_response = await LLMConfig.generate_response(
+                self.model,
+                self.tokenizer,
+                prompt,
+                device=self.device
+            )
             
             # 提取助手的回复
             try:
@@ -181,17 +140,17 @@ class LocalLLM(BaseLLM):
                     response = "抱歉，我需要一点时间来思考这个问题。"
                     logger.warning("生成的回复为空，返回默认回复")
                 
+                # 使用LLMConfig处理输出
+                formatted_response = LLMConfig.process_output(response)
+                
                 # 更新对话历史
-                self.history.append({"role": "assistant", "content": response})
+                self.history.append({"role": "assistant", "content": formatted_response})
+                
+                return formatted_response
                 
             except Exception as e:
                 logger.error(f"提取助手回复时出错: {e}")
-                response = "抱歉，我现在遇到了一些问题，请稍后再试。"
-            
-            logger.info(f"生成的回复长度: {len(response)}")
-            logger.info(f"生成的回复内容: {response}")
-            
-            return response
+                return "抱歉，我现在遇到了一些问题，请稍后再试。"
 
         except Exception as e:
             logger.error(f"生成回复时发生错误: {str(e)}", exc_info=True)
@@ -205,25 +164,17 @@ class LocalLLM(BaseLLM):
             self._log_memory_usage("流式生成前")
             
             # 构建输入
-            inputs = self.tokenizer(prompt, return_tensors="pt").to(self.device)
-            logger.info(f"输入tokens数量: {inputs['input_ids'].shape[1]}")
+            formatted_prompt = LLMConfig.format_prompt(prompt)
             
-            # 流式生成
-            for response in self.model.generate(
-                **inputs,
-                max_new_tokens=512,
-                temperature=0.7,
-                top_p=0.9,
-                do_sample=True,
-                stream=True,
+            # 使用共享方法进行流式生成
+            async for formatted_content, current_emotion in LLMConfig.generate_stream_response(
+                self.model,
+                self.tokenizer,
+                formatted_prompt,
+                device=self.device,
                 **kwargs
             ):
-                decoded = self.tokenizer.decode(response, skip_special_tokens=True)
-                if decoded.strip():
-                    yield decoded
-                else:
-                    logger.warning("流式生成过程中出现空响应")
-                    yield None
+                yield formatted_content, current_emotion
             
             # 更新历史记录
             self.history.append({"role": "user", "content": prompt})
@@ -231,4 +182,4 @@ class LocalLLM(BaseLLM):
             
         except Exception as e:
             logger.error(f"本地模型流式生成失败: {str(e)}")
-            yield None 
+            yield None, EmotionType.NORMAL 

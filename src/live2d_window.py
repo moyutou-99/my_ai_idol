@@ -1726,11 +1726,19 @@ class SpeechBubble(QWidget):
         if len(self.current_text) < len(self.target_text):
             # 每次显示3-5个字符
             chars_to_add = min(self.characters_per_update, len(self.target_text) - len(self.current_text))
-            self.current_text += self.target_text[len(self.current_text):len(self.current_text) + chars_to_add]
-            self.text_label.setText(self.current_text)
-            
-            # 根据文本长度调整气泡大小
-            self._adjust_bubble_size()
+            # 确保target_text是字符串类型
+            if isinstance(self.target_text, str):
+                self.current_text += self.target_text[len(self.current_text):len(self.current_text) + chars_to_add]
+                self.text_label.setText(self.current_text)
+                
+                # 根据文本长度调整气泡大小
+                self._adjust_bubble_size()
+            else:
+                # 如果target_text不是字符串，转换为字符串
+                self.target_text = str(self.target_text)
+                self.current_text += self.target_text[len(self.current_text):len(self.current_text) + chars_to_add]
+                self.text_label.setText(self.current_text)
+                self._adjust_bubble_size()
         else:
             self.animation_timer.stop()
             
