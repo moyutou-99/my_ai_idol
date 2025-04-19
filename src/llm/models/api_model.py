@@ -2,11 +2,19 @@ import os
 import aiohttp
 from typing import Optional
 from ..base import BaseLLM
+import json
 
 class ApiLLM(BaseLLM):
-    def __init__(self, api_key: str):
+    def __init__(self, api_type: str = "deepseek", api_key: str = None):
+        self.api_type = api_type
         self.api_key = api_key
-        self.api_url = "https://api.deepseek.com/v1/chat/completions"
+        
+        # 设置API端点
+        if api_type == "deepseek":
+            self.api_url = "https://api.deepseek.com/v1/chat/completions"
+        elif api_type == "ph":
+            self.api_url = "https://phapi.furina.junmatec.cn"  # 更新为更常见的API路径
+            
         self.headers = {
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json"
@@ -16,13 +24,25 @@ class ApiLLM(BaseLLM):
         """生成回复"""
         try:
             async with aiohttp.ClientSession() as session:
-                data = {
-                    "model": "deepseek-chat",
-                    "messages": [{"role": "user", "content": prompt}],
-                    "temperature": 0.7,
-                    "max_tokens": 512,
-                    **kwargs
-                }
+                # 根据API类型构建不同的请求数据
+                if self.api_type == "deepseek":
+                    data = {
+                        "model": "deepseek-chat",
+                        "messages": [{"role": "user", "content": prompt}],
+                        "temperature": 0.7,
+                        "max_tokens": 512,
+                        "stream": False,
+                        **kwargs
+                    }
+                elif self.api_type == "ph":
+                    data = {
+                        "model": "ph-chat",
+                        "messages": [{"role": "user", "content": prompt}],
+                        "temperature": 0.7,
+                        "max_tokens": 512,
+                        "stream": False,
+                        **kwargs
+                    }
                 
                 async with session.post(
                     self.api_url,
@@ -31,26 +51,40 @@ class ApiLLM(BaseLLM):
                 ) as response:
                     if response.status == 200:
                         result = await response.json()
-                        return result["choices"][0]["message"]["content"]
+                        if self.api_type == "deepseek":
+                            return result["choices"][0]["message"]["content"]
+                        elif self.api_type == "ph":
+                            return result["choices"][0]["message"]["content"]
                     else:
-                        print(f"API请求失败: {response.status}")
-                        return None
+                        error_text = await response.text()
+                        raise Exception(f"API请求失败: {response.status} - {error_text}")
+                        
         except Exception as e:
-            print(f"API调用失败: {e}")
-            return None
+            raise Exception(f"API调用失败: {str(e)}")
             
     async def stream_chat(self, prompt: str, **kwargs):
         """流式生成回复"""
         try:
             async with aiohttp.ClientSession() as session:
-                data = {
-                    "model": "deepseek-chat",
-                    "messages": [{"role": "user", "content": prompt}],
-                    "temperature": 0.7,
-                    "max_tokens": 512,
-                    "stream": True,
-                    **kwargs
-                }
+                # 根据API类型构建不同的请求数据
+                if self.api_type == "deepseek":
+                    data = {
+                        "model": "deepseek-chat",
+                        "messages": [{"role": "user", "content": prompt}],
+                        "temperature": 0.7,
+                        "max_tokens": 512,
+                        "stream": True,
+                        **kwargs
+                    }
+                elif self.api_type == "ph":
+                    data = {
+                        "model": "ph-chat",
+                        "messages": [{"role": "user", "content": prompt}],
+                        "temperature": 0.7,
+                        "max_tokens": 512,
+                        "stream": True,
+                        **kwargs
+                    }
                 
                 async with session.post(
                     self.api_url,
@@ -61,16 +95,22 @@ class ApiLLM(BaseLLM):
                         async for line in response.content:
                             if line:
                                 try:
-                                    json_line = json.loads(line.decode('utf-8'))
-                                    if "choices" in json_line:
-                                        content = json_line["choices"][0]["delta"].get("content", "")
-                                        if content:
-                                            yield content
+                                    json_line = json.loads(line.decode('utf-8').strip())
+                                    if self.api_type == "deepseek":
+                                        if "choices" in json_line and len(json_line["choices"]) > 0:
+                                            delta = json_line["choices"][0].get("delta", {})
+                                            if "content" in delta:
+                                                yield delta["content"]
+                                    elif self.api_type == "ph":
+                                        if "choices" in json_line and len(json_line["choices"]) > 0:
+                                            delta = json_line["choices"][0].get("delta", {})
+                                            if "content" in delta:
+                                                yield delta["content"]
                                 except json.JSONDecodeError:
                                     continue
                     else:
-                        print(f"API流式请求失败: {response.status}")
-                        yield None
+                        error_text = await response.text()
+                        raise Exception(f"API请求失败: {response.status} - {error_text}")
+                        
         except Exception as e:
-            print(f"API流式调用失败: {e}")
-            yield None 
+            raise Exception(f"API调用失败: {str(e)}") 

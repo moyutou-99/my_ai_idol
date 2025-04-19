@@ -14,6 +14,7 @@ from src.audio.audio_recorder import AudioRecorder
 from src.audio.speech_recognition import SpeechRecognizer
 from src.audio.model_manager import ModelManager
 from src.llm.models import ModelManager as LLMModelManager  # 导入LLM模型管理器
+from src.llm.config import LLMConfig  # 导入LLM配置
 
 # 配置日志
 logging.basicConfig(level=logging.INFO)
@@ -36,10 +37,14 @@ recorder = AudioRecorder(save_dir="data/recordings")
 model_manager = ModelManager()
 speech_recognizer = SpeechRecognizer()  # 直接初始化，不再需要startup_event
 
+# 初始化LLM配置
+llm_config = LLMConfig()
+
 # 初始化LLM模型管理器
 llm_manager = LLMModelManager(
-    local_model_path="Voice_models/Qwen2.5-1.5B-Instruct",
-    api_key=None,  # 如果需要使用API，请设置API密钥
+    local_model_path=llm_config.local_model_path,
+    deepseek_api_key=llm_config.deepseek_api_key,
+    ph_api_key=llm_config.ph_api_key,
     device="cuda" if torch.cuda.is_available() else "cpu",
     torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32
 )
@@ -159,6 +164,30 @@ async def chat(message: str = Form(...)):
             "status": "error",
             "message": f"生成回复失败: {str(e)}"
         }
+
+# 添加Deepseek模型的API端点
+@app.post("/api/deepseek/load")
+async def load_deepseek_model():
+    """加载Deepseek模型"""
+    try:
+        logger.info("正在加载Deepseek模型...")
+        await llm_manager.switch_model("deepseek")
+        return {"status": "success", "message": "Deepseek模型加载成功"}
+    except Exception as e:
+        logger.error(f"加载Deepseek模型失败: {str(e)}")
+        return {"status": "error", "message": str(e)}
+
+# 添加PH模型的API端点
+@app.post("/api/ph/load")
+async def load_ph_model():
+    """加载PH模型"""
+    try:
+        logger.info("正在加载PH模型...")
+        await llm_manager.switch_model("ph")
+        return {"status": "success", "message": "PH模型加载成功"}
+    except Exception as e:
+        logger.error(f"加载PH模型失败: {str(e)}")
+        return {"status": "error", "message": str(e)}
 
 # 为TTS模块预留的接口
 @app.post("/api/tts")

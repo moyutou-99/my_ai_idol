@@ -152,6 +152,10 @@ class Live2DModelWidget(QOpenGLWidget):
         self.speech_timer.timeout.connect(self._clear_speech)
         self.speech_timer.setSingleShot(True)
         
+        # 初始化模型状态
+        self.current_model = "local"  # 默认使用本地模型
+        self.model_manager = ModelManager()
+        
     def initializeGL(self):
         """初始化OpenGL"""
         try:
@@ -534,9 +538,9 @@ class Live2DModelWidget(QOpenGLWidget):
         
         menu.addSeparator()
         
-        # 添加聊天窗口控制选项
-        chat_menu = QMenu("聊天窗口", self)
-        chat_menu.setStyleSheet("""
+        # 添加模型切换选项
+        model_menu = QMenu("模型切换", self)
+        model_menu.setStyleSheet("""
             QMenu {
                 background-color: rgba(255, 255, 255, 230);
                 border: 1px solid #ccc;
@@ -555,6 +559,32 @@ class Live2DModelWidget(QOpenGLWidget):
                 margin: 5px 0px;
             }
         """)
+        menu.addMenu(model_menu)
+        
+        # 添加模型选项
+        local_model_action = QAction("本地模型", self)
+        local_model_action.setCheckable(True)
+        local_model_action.setChecked(self.current_model == "local")
+        local_model_action.triggered.connect(lambda: self.switch_model("local"))
+        model_menu.addAction(local_model_action)
+        
+        deepseek_model_action = QAction("D老师", self)
+        deepseek_model_action.setCheckable(True)
+        deepseek_model_action.setChecked(self.current_model == "deepseek")
+        deepseek_model_action.triggered.connect(lambda: self.switch_model("deepseek"))
+        model_menu.addAction(deepseek_model_action)
+        
+        ph_model_action = QAction("幻日-施工中，暂不可用", self)
+        ph_model_action.setCheckable(True)
+        ph_model_action.setChecked(self.current_model == "ph")
+        ph_model_action.triggered.connect(lambda: self.switch_model("ph"))
+        model_menu.addAction(ph_model_action)
+        
+        menu.addSeparator()
+        
+        # 添加聊天窗口控制选项
+        chat_menu = QMenu("聊天窗口", self)
+        chat_menu.setStyleSheet(model_menu.styleSheet())
         menu.addMenu(chat_menu)
         
         # 打开/关闭聊天窗口
@@ -941,6 +971,77 @@ class Live2DModelWidget(QOpenGLWidget):
         self.speech_bubble.set_text(text)
         self.speech_bubble.update_position(self.pos(), self.size())
         self.speech_timer.start(duration)
+
+    def switch_model(self, model_name):
+        """切换模型"""
+        if model_name == self.current_model:
+            return
+            
+        self.current_model = model_name
+        self.model_manager.switch_model(model_name)
+        
+        # 更新状态栏显示
+        if hasattr(self, 'status_bar'):
+            self.status_bar.showMessage(f"已切换到{model_name}模型", 3000)
+
+class ModelManager:
+    def __init__(self):
+        # 初始化模型状态
+        self.current_model = "local"
+        self.supported_models = {
+            "local": "本地模型",
+            "deepseek": "D老师",
+            "ph": "幻日"
+        }
+        
+    def switch_model(self, model_name):
+        """切换模型"""
+        try:
+            if model_name not in self.supported_models:
+                logger.error(f"不支持的模型类型: {model_name}")
+                return False
+                
+            if model_name == self.current_model:
+                logger.info(f"已经是{self.supported_models[model_name]}模型，无需切换")
+                return True
+                
+            # 发送HTTP请求到后端API进行模型切换
+            try:
+                if model_name == "deepseek":
+                    response = requests.post("http://localhost:8000/api/deepseek/load")
+                elif model_name == "ph":
+                    response = requests.post("http://localhost:8000/api/ph/load")
+                else:
+                    response = requests.post("http://localhost:8000/api/local/load")
+                    
+                if response.status_code == 200:
+                    result = response.json()
+                    if result.get("status") == "success":
+                        self.current_model = model_name
+                        logger.info(f"成功切换到{self.supported_models[model_name]}模型")
+                        return True
+                    else:
+                        error_msg = result.get("message", "未知错误")
+                        logger.error(f"模型切换失败: {error_msg}")
+                        return False
+                else:
+                    logger.error(f"模型切换请求失败，状态码: {response.status_code}")
+                    return False
+                    
+            except requests.exceptions.RequestException as e:
+                logger.error(f"模型切换请求失败: {e}")
+                return False
+                
+        except Exception as e:
+            logger.error(f"模型切换过程中发生错误: {e}")
+            return False
+            
+    def get_current_model_info(self):
+        """获取当前模型信息"""
+        return {
+            "name": self.current_model,
+            "display_name": self.supported_models.get(self.current_model, "未知模型")
+        }
 
 class Live2DWindow(QWidget):
     """主窗口，包含Live2D模型和输入框"""
