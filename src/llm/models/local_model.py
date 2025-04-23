@@ -1,19 +1,37 @@
 import os
 import torch
+import requests
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from ..base import BaseLLM, LLMConfig, EmotionType
 import logging
+from urllib.parse import quote
+from datetime import datetime
+
+# 获取项目根目录（src的上一级目录）
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+BASE_DIR = os.path.dirname(PROJECT_ROOT)  # 获取项目根目录
 
 # 配置日志
+log_dir = os.path.join(BASE_DIR, "data", "logs")
+os.makedirs(log_dir, exist_ok=True)
+
+# 设置日志文件名
+log_file = os.path.join(log_dir, f"llm_{datetime.now().strftime('%Y%m%d')}.txt")
+
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    format='[%(asctime)s] %(levelname)s: %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S',
+    handlers=[
+        logging.FileHandler(log_file, encoding='utf-8'),
+        logging.StreamHandler()  # 同时输出到控制台
+    ]
 )
 logger = logging.getLogger(__name__)
 
 class LocalLLM(BaseLLM):
     def __init__(self, model_path: str, device: str = "cuda", torch_dtype: str = "float16"):
-        super().__init__()
+        super().__init__()  # 调用父类的初始化方法
         self.model_path = model_path
         self.device = device
         self.torch_dtype = torch_dtype
@@ -145,6 +163,9 @@ class LocalLLM(BaseLLM):
                 
                 # 更新对话历史
                 self.history.append({"role": "assistant", "content": formatted_response})
+                
+                # 转换为语音并保存
+                await self.text_to_speech(formatted_response, save_to_file=True)
                 
                 return formatted_response
                 

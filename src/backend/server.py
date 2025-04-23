@@ -1,13 +1,16 @@
-from fastapi import FastAPI, UploadFile, File, Form
+from fastapi import FastAPI, UploadFile, File, Form, Query
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 import uvicorn
 import os
 import logging
 from pathlib import Path
 import json
 import asyncio
-from typing import Optional
+from typing import Optional, List
 import torch
+import requests
+from urllib.parse import quote
 
 # 导入自定义模块
 from src.audio.audio_recorder import AudioRecorder
@@ -190,11 +193,63 @@ async def load_ph_model():
         return {"status": "error", "message": str(e)}
 
 # 为TTS模块预留的接口
+@app.get("/api/tts/characters")
+async def get_tts_characters():
+    """获取可用的TTS角色列表"""
+    try:
+        # 调用TTS后端的角色列表接口
+        response = requests.get("http://127.0.0.1:5000/character_list")
+        if response.status_code == 200:
+            return {"status": "success", "characters": response.json()}
+        else:
+            return {"status": "error", "message": "获取角色列表失败"}
+    except Exception as e:
+        logger.error(f"获取TTS角色列表失败: {e}")
+        return {"status": "error", "message": str(e)}
+
 @app.post("/api/tts")
-async def text_to_speech(text: str = Form(...)):
+async def text_to_speech(
+    text: str = Form(...),
+    character: str = Form(None),
+    emotion: str = Form("default"),
+    text_language: str = Form("多语种混合"),
+    top_k: int = Form(6),
+    top_p: float = Form(0.8),
+    temperature: float = Form(0.8),
+    speed: float = Form(1.0),
+    save_temp: bool = Form(False),
+    stream: bool = Form(True)
+):
     """文本转语音（TTS模块）"""
-    # 这里将来会实现TTS功能
-    return {"status": "not_implemented", "message": "TTS模块尚未实现"}
+    try:
+        # 构建请求参数
+        params = {
+            "text": quote(text),
+            "character": character,
+            "emotion": emotion,
+            "text_language": text_language,
+            "top_k": top_k,
+            "top_p": top_p,
+            "temperature": temperature,
+            "speed": speed,
+            "save_temp": str(save_temp).lower(),
+            "stream": str(stream).lower()
+        }
+        
+        # 调用TTS后端的API
+        response = requests.get("http://127.0.0.1:5000/tts", params=params, stream=True)
+        
+        if response.status_code == 200:
+            # 始终返回流式响应
+            return StreamingResponse(
+                response.iter_content(chunk_size=1024),
+                media_type="audio/wav"
+            )
+        else:
+            return {"status": "error", "message": "TTS转换失败"}
+    except Exception as e:
+        logger.error(f"TTS转换失败: {e}")
+        return {"status": "error", "message": str(e)}
 
 def run_server(host="127.0.0.1", port=8000):
     """运行服务器"""

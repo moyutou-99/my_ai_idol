@@ -2,6 +2,16 @@ from abc import ABC, abstractmethod
 from typing import Optional, Dict, Any, Tuple
 from enum import Enum
 import torch
+import os
+import requests
+from urllib.parse import quote
+from datetime import datetime
+import logging
+
+# 获取项目根目录
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+logger = logging.getLogger(__name__)
 
 class EmotionType(Enum):
     """整合后的情绪类型"""
@@ -374,6 +384,15 @@ class LLMConfig:
 class BaseLLM(ABC):
     """基础LLM接口"""
     
+    def __init__(self):
+        # TTS相关配置
+        self.tts_character = "yuexia"  # 默认角色
+        self.tts_emotion = "default"   # 默认情感
+        # 设置语音文件保存路径
+        self.response_dir = os.path.join(BASE_DIR, "data", "response")
+        # 确保目录存在
+        os.makedirs(self.response_dir, exist_ok=True)
+    
     @abstractmethod
     async def chat(self, prompt: str, **kwargs) -> str:
         """生成回复"""
@@ -382,4 +401,67 @@ class BaseLLM(ABC):
     @abstractmethod
     async def stream_chat(self, prompt: str, **kwargs):
         """流式生成回复"""
-        pass 
+        pass
+        
+    async def text_to_speech(self, text: str, save_to_file: bool = True) -> bytes:
+        """将文本转换为语音
+        
+        Args:
+            text: 要转换的文本
+            save_to_file: 是否保存到文件，默认为True
+            
+        Returns:
+            bytes: 音频数据
+        """
+        try:
+            # 构建请求参数
+            params = {
+                "text": quote(text),
+                "character": self.tts_character,
+                "emotion": self.tts_emotion,
+                "text_language": "多语种混合",
+                "speed": 1.0,
+                "stream": "true"  # 使用流式响应
+            }
+            
+            # 调用TTS API，使用流式响应
+            response = requests.get("http://127.0.0.1:5000/tts", params=params, stream=True)
+            
+            if response.status_code == 200:
+                # 收集所有流式数据
+                audio_data = b""
+                for chunk in response.iter_content(chunk_size=1024):
+                    if chunk:
+                        audio_data += chunk
+                
+                # 如果需要保存到文件，使用完整响应重新获取
+                if save_to_file:
+                    try:
+                        # 使用完整响应重新获取音频
+                        save_params = params.copy()
+                        save_params["stream"] = "false"  # 使用完整响应
+                        save_response = requests.get("http://127.0.0.1:5000/tts", params=save_params)
+                        
+                        if save_response.status_code == 200:
+                            # 生成带日期时间的文件名
+                            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                            filename = f"response_{timestamp}.wav"
+                            filepath = os.path.join(self.response_dir, filename)
+                            
+                            # 保存音频文件
+                            with open(filepath, "wb") as f:
+                                f.write(save_response.content)
+                            logger.info(f"回复已转换为语音并保存到: {filepath}")
+                        else:
+                            logger.error(f"保存音频文件失败: {save_response.text}")
+                    except Exception as e:
+                        logger.error(f"保存音频文件时出错: {e}")
+                
+                return audio_data
+            else:
+                logger.error(f"TTS转换失败: {response.text}")
+                return None
+                
+        except Exception as e:
+            logger.error(f"TTS转换出错: {e}")
+            return None 

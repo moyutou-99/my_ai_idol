@@ -7,6 +7,7 @@ import re
 
 class ApiLLM(BaseLLM):
     def __init__(self, api_type: str = "deepseek", api_key: str = None):
+        super().__init__()  # 调用父类的初始化方法
         self.api_type = api_type
         self.api_key = api_key
         
@@ -61,7 +62,12 @@ class ApiLLM(BaseLLM):
                             content = result["choices"][0]["message"]["content"]
                             
                         # 使用LLMConfig处理输出
-                        return LLMConfig.process_output(content)
+                        formatted_response = LLMConfig.process_output(content)
+                        
+                        # 转换为语音并保存
+                        await self.text_to_speech(formatted_response, save_to_file=True)
+                        
+                        return formatted_response
                     else:
                         error_text = await response.text()
                         raise Exception(f"API请求失败: {response.status} - {error_text}")

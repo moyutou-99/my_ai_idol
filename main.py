@@ -1,6 +1,7 @@
 import sys
 import os
 import threading
+import subprocess
 from PyQt5.QtWidgets import QApplication
 from PyQt5.QtCore import QTimer
 import logging
@@ -23,6 +24,28 @@ def start_backend_server():
     except Exception as e:
         logger.error(f"后端服务器启动失败: {e}")
 
+def start_tts_server():
+    """在单独的线程中启动TTS服务器"""
+    try:
+        logger.info("正在启动TTS服务器...")
+        # 获取当前文件所在目录
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        # 构建批处理文件的完整路径
+        bat_path = os.path.join(current_dir, "Voice_models", "GPT-SoVITS-Inference", "0 一键启动脚本", "3 启动后端程序.bat")
+        
+        if not os.path.exists(bat_path):
+            logger.error(f"找不到TTS后端批处理文件: {bat_path}")
+            return
+            
+        # 切换到批处理文件所在目录
+        bat_dir = os.path.dirname(bat_path)
+        # 启动批处理文件
+        subprocess.Popen(bat_path, cwd=bat_dir, creationflags=subprocess.CREATE_NEW_CONSOLE)
+        logger.info("TTS服务器启动命令已执行")
+    except Exception as e:
+        logger.error(f"TTS服务器启动失败: {e}")
+        logger.error(f"详细错误信息: {str(e)}")
+
 def main():
     # 创建QApplication实例
     app = QApplication(sys.argv)
@@ -30,6 +53,10 @@ def main():
     # 启动后端服务器线程
     backend_thread = threading.Thread(target=start_backend_server, daemon=True)
     backend_thread.start()
+    
+    # 启动TTS服务器线程
+    tts_thread = threading.Thread(target=start_tts_server, daemon=True)
+    tts_thread.start()
     
     # 创建并显示主窗口
     window = Live2DWindow()
