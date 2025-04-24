@@ -165,7 +165,12 @@ class LocalLLM(BaseLLM):
                 self.history.append({"role": "assistant", "content": formatted_response})
                 
                 # 转换为语音并保存
-                await self.text_to_speech(formatted_response, save_to_file=True)
+                await self.text_to_speech(
+                    formatted_response, 
+                    save_to_file=True,
+                    play_audio=True,
+                    on_chunk_callback=lambda text, audio_data: self._handle_tts_callback(text, audio_data)
+                )
                 
                 return formatted_response
                 
@@ -204,3 +209,18 @@ class LocalLLM(BaseLLM):
         except Exception as e:
             logger.error(f"本地模型流式生成失败: {str(e)}")
             yield None, EmotionType.NORMAL 
+
+    async def _handle_tts_callback(self, text: str, audio_data: bytes):
+        """处理TTS回调，更新UI显示当前播放的文本"""
+        try:
+            # 获取Live2D窗口实例
+            from src.live2d_window import Live2DWindow
+            window = Live2DWindow.instance()
+            
+            if window and window.model_widget:
+                # 更新对话气泡
+                if text:  # 只有当有文本时才更新显示
+                    window.model_widget.show_speech(text, duration=0)  # duration=0表示不自动清除
+                    logger.info(f"正在播放文本: {text}")
+        except Exception as e:
+            logger.error(f"处理TTS回调时出错: {e}") 

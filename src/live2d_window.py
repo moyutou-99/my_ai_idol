@@ -1045,8 +1045,16 @@ class ModelManager:
 
 class Live2DWindow(QWidget):
     """主窗口，包含Live2D模型和输入框"""
+    _instance = None
+    
+    @classmethod
+    def instance(cls):
+        """获取Live2DWindow的单例实例"""
+        return cls._instance
+        
     def __init__(self):
         super().__init__()
+        Live2DWindow._instance = self  # 设置单例实例
         self.setWindowTitle("Live2D Desktop Pet")
         self.setGeometry(100, 100, 800, 640)  # 初始窗口大小从650改为640
         self.setWindowFlags(Qt.Window | Qt.Tool | Qt.WindowStaysOnTopHint | Qt.FramelessWindowHint)

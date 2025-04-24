@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import Optional, Dict, Any, Tuple
+from typing import Optional, Dict, Any, Tuple, List, Callable
 from enum import Enum
 import torch
 import os
@@ -7,6 +7,12 @@ import requests
 from urllib.parse import quote
 from datetime import datetime
 import logging
+import pyaudio
+import re
+import threading
+import asyncio
+import time
+from src.utils.thread_manager import ThreadManager
 
 # 获取项目根目录
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -403,65 +409,229 @@ class BaseLLM(ABC):
         """流式生成回复"""
         pass
         
-    async def text_to_speech(self, text: str, save_to_file: bool = True) -> bytes:
-        """将文本转换为语音
+    def _split_text(self, text: str) -> List[str]:
+        """将文本分割成句子"""
+        # 使用标点符号分割文本
+        sentences = re.split(r'([。！？.!?])', text)
+        # 合并标点符号和句子
+        result = []
+        for i in range(0, len(sentences)-1, 2):
+            if i+1 < len(sentences):
+                result.append(sentences[i] + sentences[i+1])
+            else:
+                result.append(sentences[i])
+        return result
+
+    def _calculate_speed(self, text: str) -> float:
+        """根据文本长度计算合适的语速"""
+        length = len(text)
+        if length < 10:
+            return 1.0
+        elif length < 20:
+            return 0.9
+        else:
+            return 0.8
+
+    async def text_to_speech(self, text: str, save_to_file: bool = True, play_audio: bool = True, 
+                            on_chunk_callback: Optional[Callable[[bytes, str], None]] = None) -> bytes:
+        """将文本转换为语音，支持流式处理和回调
         
         Args:
             text: 要转换的文本
-            save_to_file: 是否保存到文件，默认为True
-            
-        Returns:
-            bytes: 音频数据
+            save_to_file: 是否保存到文件
+            play_audio: 是否实时播放音频
+            on_chunk_callback: 处理每个音频块的函数，参数为(音频数据, 对应文本)
         """
         try:
-            # 构建请求参数
-            params = {
-                "text": quote(text),
-                "character": self.tts_character,
-                "emotion": self.tts_emotion,
-                "text_language": "多语种混合",
-                "speed": 1.0,
-                "stream": "true"  # 使用流式响应
-            }
+            logger.info(f"开始TTS转换，文本长度: {len(text)}")
             
-            # 调用TTS API，使用流式响应
-            response = requests.get("http://127.0.0.1:5000/tts", params=params, stream=True)
+            # 将文本按标点符号分割成句子
+            sentences = self._split_text(text)
             
-            if response.status_code == 200:
-                # 收集所有流式数据
-                audio_data = b""
-                for chunk in response.iter_content(chunk_size=1024):
-                    if chunk:
-                        audio_data += chunk
-                
-                # 如果需要保存到文件，使用完整响应重新获取
-                if save_to_file:
+            # 创建线程管理器
+            thread_manager = ThreadManager()
+            
+            # 创建音频处理队列
+            audio_queue = thread_manager.create_queue("audio_queue")
+            text_queue = thread_manager.create_queue("text_queue")
+            
+            # 创建事件用于同步
+            audio_ready = threading.Event()
+            processing_done = threading.Event()
+            all_audio_sent = threading.Event()  # 新增：标记所有音频数据是否已发送
+            
+            # 定义音频处理线程函数
+            def audio_processor(stop_event: threading.Event):
+                try:
+                    p = pyaudio.PyAudio()
+                    stream = p.open(format=p.get_format_from_width(2),
+                                  channels=1,
+                                  rate=32000,
+                                  output=True)
+                    
+                    # 通知主线程音频设备已准备好
+                    audio_ready.set()
+                    
+                    # 用于跟踪音频处理状态
+                    last_audio_time = time.time()
+                    is_processing = True
+                    audio_queue_empty = False
+                    
+                    while not stop_event.is_set():
+                        try:
+                            # 从队列获取音频数据，增加超时时间
+                            audio_data = thread_manager.get_from_queue("audio_queue", timeout=1.0)
+                            if audio_data:
+                                # 更新最后处理时间
+                                last_audio_time = time.time()
+                                is_processing = True
+                                audio_queue_empty = False
+                                # 播放音频
+                                stream.write(audio_data)
+                            else:
+                                # 检查是否已经超过2秒没有收到新的音频数据
+                                if is_processing and time.time() - last_audio_time > 2.0:
+                                    # 如果所有音频数据都已发送且队列为空，则认为处理完成
+                                    if all_audio_sent.is_set() and thread_manager.is_queue_empty("audio_queue"):
+                                        if not audio_queue_empty:
+                                            audio_queue_empty = True
+                                            # 等待一小段时间确保音频播放完成
+                                            time.sleep(0.5)
+                                        else:
+                                            is_processing = False
+                                            # 通知主线程音频处理完成
+                                            processing_done.set()
+                        except Exception as e:
+                            if not stop_event.is_set():  # 只有在非正常停止时才记录错误
+                                logger.error(f"音频处理错误: {e}")
+                            continue
+                    
+                    # 清理资源
+                    stream.stop_stream()
+                    stream.close()
+                    p.terminate()
+                except Exception as e:
+                    logger.error(f"音频处理器初始化错误: {e}")
+            
+            # 定义文本处理线程函数
+            def text_processor(stop_event: threading.Event):
+                while not stop_event.is_set():
                     try:
-                        # 使用完整响应重新获取音频
-                        save_params = params.copy()
-                        save_params["stream"] = "false"  # 使用完整响应
-                        save_response = requests.get("http://127.0.0.1:5000/tts", params=save_params)
-                        
-                        if save_response.status_code == 200:
-                            # 生成带日期时间的文件名
-                            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                            filename = f"response_{timestamp}.wav"
-                            filepath = os.path.join(self.response_dir, filename)
-                            
-                            # 保存音频文件
-                            with open(filepath, "wb") as f:
-                                f.write(save_response.content)
-                            logger.info(f"回复已转换为语音并保存到: {filepath}")
-                        else:
-                            logger.error(f"保存音频文件失败: {save_response.text}")
+                        # 从队列获取文本，增加超时时间
+                        text_data = thread_manager.get_from_queue("text_queue", timeout=1.0)
+                        if text_data and on_chunk_callback:
+                            # 创建一个新的事件循环来执行异步回调
+                            loop = asyncio.new_event_loop()
+                            asyncio.set_event_loop(loop)
+                            try:
+                                loop.run_until_complete(on_chunk_callback(text_data, b""))
+                            finally:
+                                loop.close()
                     except Exception as e:
-                        logger.error(f"保存音频文件时出错: {e}")
-                
-                return audio_data
-            else:
-                logger.error(f"TTS转换失败: {response.text}")
+                        if not stop_event.is_set():  # 只有在非正常停止时才记录错误
+                            logger.error(f"文本处理错误: {e}")
+                        continue
+            
+            # 创建并启动线程
+            thread_manager.create_thread("audio_processor", audio_processor)
+            thread_manager.create_thread("text_processor", text_processor)
+            
+            # 启动线程
+            thread_manager.start_thread("audio_processor")
+            thread_manager.start_thread("text_processor")
+            
+            # 等待音频设备准备就绪
+            audio_ready.wait(timeout=5.0)
+            if not audio_ready.is_set():
+                logger.error("音频设备初始化超时")
                 return None
+            
+            # 用于保存完整的音频数据
+            complete_audio_data = b""
+            
+            # 第一步：使用流式响应进行实时播放
+            for sentence in sentences:
+                # 将文本放入队列
+                thread_manager.put_to_queue("text_queue", sentence)
                 
+                # 获取当前句子的音频（流式）
+                params = {
+                    "text": quote(sentence),
+                    "character": self.tts_character,
+                    "emotion": self.tts_emotion,
+                    "text_language": "多语种混合",
+                    "speed": self._calculate_speed(sentence),
+                    "stream": "true"
+                }
+                
+                logger.info(f"正在处理句子（流式）: {sentence}")
+                try:
+                    response = requests.get("http://127.0.0.1:5000/tts", params=params, stream=True)
+                    if response.status_code == 200:
+                        # 在开始处理音频数据之前，先调用回调函数显示当前句子
+                        if on_chunk_callback:
+                            await on_chunk_callback(sentence, b"")
+                            
+                        # 流式处理音频数据
+                        for chunk in response.iter_content(chunk_size=1024):
+                            if chunk:
+                                # 将音频数据放入队列用于播放
+                                if play_audio:
+                                    thread_manager.put_to_queue("audio_queue", chunk)
+                    else:
+                        logger.error(f"TTS流式请求失败，状态码: {response.status_code}")
+                except Exception as e:
+                    logger.error(f"TTS流式处理错误: {e}")
+            
+            # 标记所有音频数据已发送
+            all_audio_sent.set()
+            
+            # 第二步：使用完整响应保存文件
+            if save_to_file:
+                try:
+                    # 获取完整的音频数据
+                    params = {
+                        "text": quote(text),
+                        "character": self.tts_character,
+                        "emotion": self.tts_emotion,
+                        "text_language": "多语种混合",
+                        "speed": self._calculate_speed(text),
+                        "stream": "false"  # 使用完整响应
+                    }
+                    
+                    logger.info("正在获取完整音频数据用于保存")
+                    response = requests.get("http://127.0.0.1:5000/tts", params=params)
+                    
+                    if response.status_code == 200:
+                        complete_audio_data = response.content
+                        
+                        # 保存音频文件
+                        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                        filename = f"response_{timestamp}.wav"
+                        filepath = os.path.join(self.response_dir, filename)
+                        
+                        os.makedirs(self.response_dir, exist_ok=True)
+                        with open(filepath, "wb") as f:
+                            f.write(complete_audio_data)
+                        logger.info(f"音频文件已保存: {filepath}")
+                    else:
+                        logger.error(f"TTS完整响应请求失败，状态码: {response.status_code}")
+                except Exception as e:
+                    logger.error(f"保存音频文件时出错: {e}")
+            
+            # 等待音频处理完成
+            if play_audio:
+                # 等待音频处理完成信号
+                processing_done.wait(timeout=60.0)  # 增加超时时间到60秒
+                if not processing_done.is_set():
+                    logger.warning("音频处理超时，可能未完全播放")
+            
+            # 停止所有线程
+            thread_manager.stop_all()
+            
+            logger.info("TTS转换完成")
+            return complete_audio_data
+            
         except Exception as e:
-            logger.error(f"TTS转换出错: {e}")
+            logger.error(f"TTS转换过程中发生错误: {e}")
             return None 

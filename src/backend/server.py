@@ -11,6 +11,9 @@ from typing import Optional, List
 import torch
 import requests
 from urllib.parse import quote
+import threading
+import pyaudio
+from datetime import datetime
 
 # 导入自定义模块
 from src.audio.audio_recorder import AudioRecorder
@@ -18,6 +21,7 @@ from src.audio.speech_recognition import SpeechRecognizer
 from src.audio.model_manager import ModelManager
 from src.llm.models import ModelManager as LLMModelManager  # 导入LLM模型管理器
 from src.llm.config import LLMConfig  # 导入LLM配置
+from src.utils.thread_manager import ThreadManager
 
 # 配置日志
 logging.basicConfig(level=logging.INFO)
@@ -218,10 +222,78 @@ async def text_to_speech(
     temperature: float = Form(0.8),
     speed: float = Form(1.0),
     save_temp: bool = Form(False),
-    stream: bool = Form(True)
+    stream: bool = Form(False)
 ):
-    """文本转语音（TTS模块）"""
+    """TTS转换端点"""
     try:
+        # 创建线程管理器
+        thread_manager = ThreadManager()
+        
+        # 创建音频处理队列
+        audio_queue = thread_manager.create_queue("audio_queue")
+        save_queue = thread_manager.create_queue("save_queue")
+        
+        # 定义音频处理线程函数
+        def audio_processor(stop_event: threading.Event):
+            p = pyaudio.PyAudio()
+            stream = p.open(format=p.get_format_from_width(2),
+                          channels=1,
+                          rate=32000,
+                          output=True)
+            
+            while not stop_event.is_set():
+                try:
+                    # 从队列获取音频数据
+                    audio_data = thread_manager.get_from_queue("audio_queue", timeout=0.1)
+                    if audio_data:
+                        # 播放音频
+                        stream.write(audio_data)
+                        # 如果需要保存，将数据放入保存队列
+                        if save_temp:
+                            thread_manager.put_to_queue("save_queue", audio_data)
+                except Exception as e:
+                    logger.error(f"音频处理错误: {e}")
+                    break
+            
+            # 清理资源
+            stream.stop_stream()
+            stream.close()
+            p.terminate()
+        
+        # 定义保存线程函数
+        def save_processor(stop_event: threading.Event):
+            audio_data = b""
+            while not stop_event.is_set():
+                try:
+                    # 从队列获取音频数据
+                    chunk = thread_manager.get_from_queue("save_queue", timeout=0.1)
+                    if chunk:
+                        audio_data += chunk
+                except Exception as e:
+                    logger.error(f"保存处理错误: {e}")
+                    break
+            
+            # 保存文件
+            if save_temp and audio_data:
+                try:
+                    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                    filename = f"temp_{timestamp}.wav"
+                    filepath = os.path.join("data", "temp", filename)
+                    
+                    os.makedirs(os.path.dirname(filepath), exist_ok=True)
+                    with open(filepath, "wb") as f:
+                        f.write(audio_data)
+                    logger.info(f"临时音频文件已保存: {filepath}")
+                except Exception as e:
+                    logger.error(f"保存临时音频文件时出错: {e}")
+        
+        # 创建并启动线程
+        thread_manager.create_thread("audio_processor", audio_processor)
+        thread_manager.create_thread("save_processor", save_processor)
+        
+        thread_manager.start_thread("audio_processor")
+        thread_manager.start_thread("save_processor")
+        
         # 构建请求参数
         params = {
             "text": quote(text),
@@ -232,21 +304,46 @@ async def text_to_speech(
             "top_p": top_p,
             "temperature": temperature,
             "speed": speed,
-            "save_temp": str(save_temp).lower(),
-            "stream": str(stream).lower()
+            "save_temp": "true" if save_temp else "false",
+            "stream": "true" if stream else "false"
         }
         
-        # 调用TTS后端的API
+        # 发送请求到TTS服务
         response = requests.get("http://127.0.0.1:5000/tts", params=params, stream=True)
         
         if response.status_code == 200:
-            # 始终返回流式响应
-            return StreamingResponse(
-                response.iter_content(chunk_size=1024),
-                media_type="audio/wav"
-            )
+            # 如果是流式传输，返回流式响应
+            if stream:
+                async def generate():
+                    try:
+                        for chunk in response.iter_content(chunk_size=1024):
+                            if chunk:
+                                # 将音频数据放入队列
+                                thread_manager.put_to_queue("audio_queue", chunk)
+                                yield chunk
+                    finally:
+                        # 等待所有处理完成
+                        import time
+                        time.sleep(1)
+                        # 停止所有线程
+                        thread_manager.stop_all()
+                
+                return StreamingResponse(generate(), media_type="audio/wav")
+            else:
+                # 非流式传输，直接返回完整响应
+                audio_data = response.content
+                thread_manager.put_to_queue("audio_queue", audio_data)
+                
+                # 等待所有处理完成
+                import time
+                time.sleep(1)
+                thread_manager.stop_all()
+                
+                return Response(content=audio_data, media_type="audio/wav")
         else:
-            return {"status": "error", "message": "TTS转换失败"}
+            thread_manager.stop_all()
+            return {"status": "error", "message": f"TTS服务返回错误: {response.status_code}"}
+            
     except Exception as e:
         logger.error(f"TTS转换失败: {e}")
         return {"status": "error", "message": str(e)}
