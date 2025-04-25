@@ -1,9 +1,12 @@
+import logging
 import os
 import aiohttp
 from typing import Optional, Tuple
 from ..base import BaseLLM, EmotionType, LLMConfig
 import json
 import re
+
+logger = logging.getLogger(__name__)
 
 class ApiLLM(BaseLLM):
     def __init__(self, api_type: str = "deepseek", api_key: str = None):

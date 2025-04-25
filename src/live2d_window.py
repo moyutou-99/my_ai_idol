@@ -1,7 +1,10 @@
 import sys
 from PyQt5.QtWidgets import QOpenGLWidget, QMenu, QAction, QInputDialog, QTextEdit, QPushButton, QHBoxLayout, QWidget, QVBoxLayout, QApplication, QLabel
-from PyQt5.QtCore import QTimer, Qt, QPoint, QSize, pyqtSignal
+from PyQt5.QtCore import QTimer, Qt, QPoint, QSize, pyqtSignal, QObject
 from PyQt5.QtGui import QPainter, QColor, QLinearGradient, QBrush, QGuiApplication, QCursor, QIcon, QPen, QPainterPath
+import aiohttp
+import asyncio
+import qasync
 from OpenGL.GL import *
 import live2d.v3 as live2d
 from live2d.v3 import StandardParams
@@ -15,6 +18,8 @@ from collections import deque
 from .live2d_parameters import Live2DParameters
 import requests
 import re
+from concurrent.futures import ThreadPoolExecutor
+import pyaudio
 
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
@@ -146,7 +151,7 @@ class Live2DModelWidget(QOpenGLWidget):
         self.message_queue = []  # 添加消息队列
         
         # 对话气泡相关
-        self.speech_bubble = None  # 初始化为None
+        self.speech_bubble = SpeechBubble(self)  # 确保在初始化时创建气泡
         self.current_speech = None
         self.speech_timer = QTimer()
         self.speech_timer.timeout.connect(self._clear_speech)
@@ -833,25 +838,49 @@ class Live2DModelWidget(QOpenGLWidget):
         super().moveEvent(event)
         
     def close_model(self):
-        """关闭模型和输入框"""
-        # 关闭聊天窗口
-        if self.chat_window:
-            self.chat_window.close()  # 这里使用close而不是hide，因为模型窗口要完全关闭
-            self.chat_window = None
+        """关闭模型"""
+        try:
+            logger.info("开始关闭模型...")
             
-        # 关闭对话气泡
-        if self.speech_bubble:
-            self.speech_bubble.close()
-            self.speech_bubble = None
+            # 关闭聊天窗口
+            if self.chat_window:
+                self.chat_window.close()
+                self.chat_window = None
+                
+            # 关闭气泡
+            if self.speech_bubble:
+                self.speech_bubble.close()
+                self.speech_bubble = None
+                
+            # 停止所有定时器
+            if hasattr(self, 'scale_animation_timer'):
+                self.scale_animation_timer.stop()
+            if hasattr(self, 'animation_timer'):
+                self.animation_timer.stop()
+            if hasattr(self, 'auto_action_timer'):
+                self.auto_action_timer.stop()
+            if hasattr(self, 'speech_timer'):
+                self.speech_timer.stop()
+                
+            # 清理模型资源
+            self.model = None
             
-        # 关闭模型窗口
-        self.close()
-        # 发出关闭信号，通知主窗口关闭输入框
-        self.closed.emit()
-        # 关闭整个应用程序
-        QApplication.instance().quit()
-        # 强制退出程序
-        sys.exit(0)
+            # 关闭模型窗口
+            logger.info("关闭模型窗口...")
+            self.closed.emit()  # 发送关闭信号
+            
+            # 强制退出程序
+            logger.info("强制退出程序...")
+            app = QApplication.instance()
+            if app:
+                app.quit()
+                
+            # 确保程序退出
+            os._exit(0)
+            
+        except Exception as e:
+            logger.error(f"关闭模型时出错: {str(e)}")
+            os._exit(1)
 
     def wheelEvent(self, event):
         """处理鼠标滚轮事件，实现缩放功能"""
@@ -963,10 +992,14 @@ class Live2DModelWidget(QOpenGLWidget):
     def _clear_speech(self):
         """清除对话气泡内容"""
         self.current_speech = None
-        self.speech_bubble.set_text("...")
+        if hasattr(self, 'speech_bubble') and self.speech_bubble is not None:
+            self.speech_bubble.set_text("...")
         
     def show_speech(self, text, duration=5000):
         """显示对话气泡"""
+        if not hasattr(self, 'speech_bubble') or self.speech_bubble is None:
+            self.speech_bubble = SpeechBubble(self)
+            
         self.current_speech = text
         self.speech_bubble.set_text(text)
         self.speech_bubble.update_position(self.pos(), self.size())
@@ -1046,92 +1079,72 @@ class ModelManager:
 class Live2DWindow(QWidget):
     """主窗口，包含Live2D模型和输入框"""
     _instance = None
+    response_received = pyqtSignal(str)  # LLM回复信号
+    text_updated = pyqtSignal(str)       # 文本更新信号
     
-    @classmethod
-    def instance(cls):
-        """获取Live2DWindow的单例实例"""
-        return cls._instance
-        
     def __init__(self):
         super().__init__()
-        Live2DWindow._instance = self  # 设置单例实例
+        Live2DWindow._instance = self
         self.setWindowTitle("Live2D Desktop Pet")
-        self.setGeometry(100, 100, 800, 640)  # 初始窗口大小从650改为640
+        self.setGeometry(100, 100, 800, 640)
         self.setWindowFlags(Qt.Window | Qt.Tool | Qt.WindowStaysOnTopHint | Qt.FramelessWindowHint)
         self.setAttribute(Qt.WA_TranslucentBackground)
         
+        # 创建主布局
+        self.main_layout = QVBoxLayout(self)
+        self.main_layout.setContentsMargins(0, 0, 0, 0)
+        self.main_layout.setSpacing(0)
+        
         # 创建Live2D模型窗口
         self.model_widget = Live2DModelWidget()
-        self.model_widget.setGeometry(100, 100, 800, 600)  # 固定高度为600
+        self.model_widget.setGeometry(100, 100, 800, 600)
         
         # 连接模型窗口的关闭信号
         self.model_widget.closed.connect(self.close_input_container)
         
-        # 创建输入框和按钮容器作为独立窗口
-        self.input_container = QWidget(None)  # 不设置父窗口
+        # 创建输入框和按钮容器
+        self.input_container = QWidget(None)
         self.input_container.setWindowFlags(Qt.Window | Qt.Tool | Qt.WindowStaysOnTopHint | Qt.FramelessWindowHint)
         self.input_container.setAttribute(Qt.WA_TranslucentBackground)
         
-        # 初始化输入框位置，使其位于模型底部
+        # 初始化输入框位置
         model_pos = self.model_widget.pos()
         model_width = self.model_widget.width()
         model_height = self.model_widget.height()
         
         # 计算模型底部中心位置
         model_bottom_center_x = model_pos.x() + model_width // 2
-        
-        # 计算输入框的位置，使其水平居中于模型底部
         input_x = model_bottom_center_x - 490 // 2
+        input_y = model_pos.y() + model_height - 60
         
-        # 计算输入框的垂直位置，使其位于模型底部
-        input_y = model_pos.y() + model_height - 60  # 距离底部60像素
+        self.input_container.setGeometry(input_x, input_y, 490, 100)
         
-        # 设置输入框容器的位置和大小
-        self.input_container.setGeometry(
-            input_x,
-            input_y,
-            490, 40  # 确保有足够的高度
-        )
-        
-        # 创建垂直布局
-        self.main_layout = QVBoxLayout(self.input_container)
-        self.main_layout.setContentsMargins(0, 0, 0, 0)
-        self.main_layout.setSpacing(0)
-        
-        # 创建水平布局用于输入框和按钮
-        self.input_layout = QHBoxLayout()
-        self.input_layout.setContentsMargins(0, 0, 0, 0)
+        # 创建输入布局
+        self.input_layout = QVBoxLayout(self.input_container)
+        self.input_layout.setContentsMargins(10, 10, 10, 10)
         self.input_layout.setSpacing(5)
+        
+        # 创建输入框布局
+        self.input_box_layout = QHBoxLayout()
+        self.input_box_layout.setSpacing(5)
         
         # 创建输入框
         self.input_box = QTextEdit()
-        self.input_box.setPlaceholderText("输入消息...")
+        self.input_box.setPlaceholderText("请输入消息...")
+        self.input_box.setFixedHeight(60)
         self.input_box.setStyleSheet("""
             QTextEdit {
-                background-color: rgba(255, 255, 255, 200);  /* 白色背景 */
+                background-color: rgba(255, 255, 255, 200);
                 border: 1px solid #ccc;
-                border-radius: 15px;
-                padding: 5px 10px;
-                font-size: 14px;
-                min-height: 28px;
-            }
-            QTextEdit:focus {
-                border: 1px solid #0078d7;  /* 蓝色边框 */
-                background-color: rgba(255, 255, 255, 200);  /* 聚焦时更亮的白色 */
+                border-radius: 5px;
+                padding: 5px;
             }
         """)
-        self.input_box.setFixedHeight(28)  # 从20增加到30，设置为1.5倍文字高度
-        self.input_box.setMinimumHeight(28)  # 从20增加到30
-        self.input_box.setMaximumHeight(100)  # 设置最大高度
-        self.input_box.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)  # 添加垂直滚动条
-        self.input_box.setAcceptRichText(False)  # 只接受纯文本
-        self.input_box.textChanged.connect(self.adjust_input_height)
-        self.input_box.setFocusPolicy(Qt.StrongFocus)  # 设置焦点策略
-        self.input_box.setMouseTracking(True)  # 启用鼠标追踪
-        self.input_box.setReadOnly(False)  # 确保输入框可编辑
-        self.input_box.setTabChangesFocus(False)  # 禁用Tab键切换焦点
-        self.input_box.setFocus()  # 初始设置焦点
-        self.input_box.installEventFilter(self)  # 安装事件过滤器
+        
+        # 确保输入框可编辑
+        self.input_box.setTabChangesFocus(False)
+        self.input_box.setFocus()
+        self.input_box.installEventFilter(self)
         
         # 创建按钮容器
         self.button_container = QWidget()
@@ -1146,12 +1159,12 @@ class Live2DWindow(QWidget):
         self.voice_button.setFixedSize(30, 30)
         self.voice_button.setStyleSheet("""
             QPushButton {
-                background-color: rgba(255, 255, 255, 200);  /* 白色背景 */
+                background-color: rgba(255, 255, 255, 200);
                 border: 1px solid #ccc;
                 border-radius: 15px;
             }
             QPushButton:hover {
-                background-color: rgba(255, 255, 255, 200);  /* 悬停时更亮的白色 */
+                background-color: rgba(255, 255, 255, 200);
             }
         """)
         
@@ -1161,12 +1174,12 @@ class Live2DWindow(QWidget):
         self.send_button.setFixedSize(30, 30)
         self.send_button.setStyleSheet("""
             QPushButton {
-                background-color: rgba(255, 255, 255, 200);  /* 白色背景 */
+                background-color: rgba(255, 255, 255, 200);
                 border: 1px solid #ccc;
                 border-radius: 15px;
             }
             QPushButton:hover {
-                background-color: rgba(255, 255, 255, 200);  /* 悬停时更亮的白色 */
+                background-color: rgba(255, 255, 255, 200);
             }
         """)
         
@@ -1175,11 +1188,17 @@ class Live2DWindow(QWidget):
         self.button_layout.addWidget(self.send_button)
         
         # 添加输入框和按钮容器到水平布局
-        self.input_layout.addWidget(self.input_box)
-        self.input_layout.addWidget(self.button_container)
+        self.input_box_layout.addWidget(self.input_box)
+        self.input_box_layout.addWidget(self.button_container)
         
-        # 添加水平布局到主布局
-        self.main_layout.addLayout(self.input_layout)
+        # 添加水平布局到垂直布局
+        self.input_layout.addLayout(self.input_box_layout)
+        
+        # 添加处理状态指示器
+        self.processing_label = QLabel("处理中...")
+        self.processing_label.setVisible(False)
+        self.processing_label.setStyleSheet("color: red;")
+        self.input_layout.addWidget(self.processing_label)
         
         # 连接按钮信号
         self.voice_button.clicked.connect(self.start_voice_input)
@@ -1193,7 +1212,80 @@ class Live2DWindow(QWidget):
         
         # 显示窗口
         self.show()
-        self.input_container.show()  # 显示输入框容器
+        self.input_container.show()
+        
+        # 初始化异步事件循环
+        self.loop = qasync.QEventLoop(self)
+        asyncio.set_event_loop(self.loop)
+        
+        # 连接信号
+        self.response_received.connect(self.handle_response)
+        self.text_updated.connect(self.update_text_display)
+        
+        # 创建线程池
+        self.llm_executor = ThreadPoolExecutor(max_workers=1)
+        
+        # 初始化状态
+        self.is_processing = False
+        self.current_text = ""
+        
+    def handle_tts_status(self, is_processing):
+        """处理TTS状态变化"""
+        self.processing_label.setText("语音合成中..." if is_processing else "处理中...")
+        self.processing_label.setVisible(is_processing)
+        
+    def update_text_display(self, text):
+        """更新文本显示"""
+        self.model_widget.add_chat_message(self.model_widget.character_name, text)
+        self.model_widget.show_speech(text)
+        
+    def handle_response(self, reply):
+        """处理LLM回复"""
+        # 更新UI显示
+        self.text_updated.emit(reply)
+        
+        # 设置处理状态
+        self.is_processing = True
+        self.processing_label.setVisible(True)
+        
+        # 在LLM线程中处理TTS
+        self.llm_executor.submit(self.process_tts, reply)
+        
+    def process_tts(self, text):
+        """处理语音合成"""
+        try:
+            # 获取LLM实例
+            from src.llm.models.local_model import LocalLLM
+            llm = LocalLLM.instance()
+            
+            if llm:
+                # 设置TTS状态回调
+                llm.set_tts_status_callback(self.handle_tts_status)
+                
+                # 设置TTS文本回调
+                async def on_chunk_callback(text, audio_data):
+                    self.model_widget.show_speech(text, duration=0)
+                
+                # 执行TTS转换
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                try:
+                    loop.run_until_complete(llm.text_to_speech(
+                        text,
+                        save_to_file=True,
+                        play_audio=True,
+                        on_chunk_callback=on_chunk_callback
+                    ))
+                finally:
+                    loop.close()
+            else:
+                logger.error("LLM实例未初始化")
+                
+        except Exception as e:
+            logger.error(f"TTS处理失败: {e}")
+        finally:
+            self.is_processing = False
+            self.processing_label.setVisible(False)
         
     def on_model_scaled(self, scale_factor):
         """当模型窗口缩放时更新输入框位置"""
@@ -1360,121 +1452,43 @@ class Live2DWindow(QWidget):
     def send_message(self):
         """发送消息"""
         message = self.input_box.toPlainText().strip()
-        if message:
+        if message and not self.is_processing:
+            # 设置处理状态
+            self.is_processing = True
+            self.processing_label.setVisible(True)
+            
             # 将消息发送到聊天窗口
             self.model_widget.add_chat_message("我", message)
-            
-            # 发送消息到后端LLM模块
-            try:
-                response = requests.post(
-                    "http://127.0.0.1:8000/api/chat",
-                    data={"message": message}
-                )
-                
-                if response.status_code == 200:
-                    data = response.json()
-                    if data["status"] == "success":
-                        # 添加LLM的回复到聊天窗口
-                        self.model_widget.add_chat_message(self.model_widget.character_name, data["message"])
-                        # 在气泡中显示回复
-                        self.model_widget.show_speech(data["message"])
-                    else:
-                        error_msg = f"错误：{data['message']}"
-                        self.model_widget.add_chat_message("系统", error_msg)
-                        self.model_widget.show_speech(error_msg)
-                else:
-                    error_msg = "与服务器通信失败"
-                    self.model_widget.add_chat_message("系统", error_msg)
-                    self.model_widget.show_speech(error_msg)
-            except Exception as e:
-                error_msg = f"发送消息失败：{str(e)}"
-                self.model_widget.add_chat_message("系统", error_msg)
-                self.model_widget.show_speech(error_msg)
             
             # 清空输入框
             self.input_box.clear()
             
-    def adjust_input_height(self):
-        """根据输入框内容调整高度"""
-        # 获取文本内容
-        text = self.input_box.toPlainText()
-        # 计算文本长度
-        text_length = len(text)
-        
-        # 如果文本长度超过30个字符，增加输入框高度
-        if text_length > 30:
-            # 计算需要增加的高度（每30个字符增加一行）
-            additional_lines = (text_length - 1) // 30
-            new_height = 40 + (additional_lines * 20)  # 每行增加20像素高度
+            # 在LLM线程中处理消息
+            self.llm_executor.submit(self.process_llm_message, message)
             
-            # 限制最大高度
-            max_height = 120
-            new_height = min(new_height, max_height)
+    def process_llm_message(self, message):
+        """在LLM线程中处理消息"""
+        try:
+            # 发送消息到后端LLM模块
+            response = requests.post(
+                "http://127.0.0.1:8000/api/chat",
+                data={"message": message}
+            )
             
-            # 调整输入框容器高度
-            self.input_container.setFixedHeight(new_height)
-            
-            # 调整输入框高度
-            self.input_box.setFixedHeight(new_height - 10)  # 留出一些边距
-            
-            # 调整窗口大小，但保持模型区域不变
-            current_width = self.width()
-            current_model_height = 600  # 模型区域高度
-            new_window_height = current_model_height + new_height  # 模型区域高度加上输入框高度
-            self.resize(current_width, new_window_height)
-            
-            # 更新输入框位置，使其始终保持在模型底部
-            model_pos = self.model_widget.pos()
-            model_width = self.model_widget.width()
-            model_height = self.model_widget.height()
-            
-            # 计算模型底部中心位置
-            model_bottom_center_x = model_pos.x() + model_width // 2
-            
-            # 计算输入框的新位置，使其水平居中于模型底部
-            new_input_x = model_bottom_center_x - 490 // 2
-            
-            # 计算输入框的垂直位置，使其位于模型底部
-            new_input_y = model_pos.y() + model_height - 60  # 距离底部60像素
-            
-            # 设置新的输入框位置
-            self.input_container.move(new_input_x, new_input_y)
-            
-            # 确保输入框容器和输入框在最顶层
-            self.input_container.raise_()
-            self.input_box.raise_()
-        else:
-            # 恢复默认高度，但确保不小于30像素
-            self.input_container.setFixedHeight(40)  # 从30增加到40
-            
-            # 恢复输入框高度，但确保不小于30像素
-            self.input_box.setFixedHeight(30)  # 从20增加到30
-            
-            # 恢复窗口大小
-            current_width = self.width()
-            current_model_height = 600  # 模型区域高度
-            self.resize(current_width, current_model_height + 40)  # 模型区域高度加上默认输入框高度
-            
-            # 更新输入框位置，使其始终保持在模型底部
-            model_pos = self.model_widget.pos()
-            model_width = self.model_widget.width()
-            model_height = self.model_widget.height()
-            
-            # 计算模型底部中心位置
-            model_bottom_center_x = model_pos.x() + model_width // 2
-            
-            # 计算输入框的新位置，使其水平居中于模型底部
-            new_input_x = model_bottom_center_x - 490 // 2
-            
-            # 计算输入框的垂直位置，使其位于模型底部
-            new_input_y = model_pos.y() + model_height - 60  # 距离底部60像素
-            
-            # 设置新的输入框位置
-            self.input_container.move(new_input_x, new_input_y)
-            
-            # 确保输入框容器和输入框在最顶层
-            self.input_container.raise_()
-            self.input_box.raise_()
+            if response.status_code == 200:
+                data = response.json()
+                if data["status"] == "success":
+                    # 发送信号更新UI和启动TTS
+                    self.response_received.emit(data["message"])
+                else:
+                    error_msg = f"错误：{data['message']}"
+                    self.response_received.emit(error_msg)
+            else:
+                error_msg = "与服务器通信失败"
+                self.response_received.emit(error_msg)
+        except Exception as e:
+            error_msg = f"发送消息失败：{str(e)}"
+            self.response_received.emit(error_msg)
             
     def showEvent(self, event):
         """窗口显示事件"""
@@ -1568,7 +1582,41 @@ class Live2DWindow(QWidget):
                 # 输出调试信息
                 # print("焦点获取：输入框获得焦点")
                 return False
+            elif event.type() == event.KeyPress:
+                # 处理键盘事件
+                if event.key() == Qt.Key_Return or event.key() == Qt.Key_Enter:
+                    # 检查是否同时按下了Shift键
+                    if event.modifiers() & Qt.ShiftModifier:
+                        # Shift+回车，插入换行符
+                        cursor = self.input_box.textCursor()
+                        cursor.insertText("\n")
+                        return True
+                    else:
+                        # 普通回车，发送消息
+                        self.send_message()
+                        return True
         return super().eventFilter(obj, event)
+
+    async def send_message_async(self, message):
+        """异步发送消息"""
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    "http://127.0.0.1:8000/api/chat",
+                    data={"message": message}
+                ) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        if data["status"] == "success":
+                            self.response_received.emit(data["message"])
+        except Exception as e:
+            logger.error(f"发送消息失败: {e}")
+            self.response_received.emit("抱歉，发送消息时出现错误。")
+    
+    def handle_tts_status(self, is_processing):
+        """处理TTS状态变化"""
+        self.processing_label.setText("语音合成中..." if is_processing else "处理中...")
+        self.processing_label.setVisible(is_processing)
 
 class ChatWindow(QWidget):
     """聊天窗口类"""

@@ -76,11 +76,13 @@ class ThreadManager:
             logger.warning(f"线程 {name} 已经在运行")
             return False
     
-    def stop_thread(self, name: str) -> bool:
+    def stop_thread(self, name: str, wait: bool = True, timeout: Optional[float] = None) -> bool:
         """停止指定名称的线程
         
         Args:
             name: 线程名称
+            wait: 是否等待线程完成
+            timeout: 等待超时时间，None表示无限等待
         """
         if name not in self.threads:
             logger.error(f"线程 {name} 不存在")
@@ -91,17 +93,46 @@ class ThreadManager:
             
         thread = self.threads[name]
         if thread.is_alive():
-            thread.join(timeout=1.0)
+            if wait:
+                thread.join(timeout=timeout)
+                if thread.is_alive():
+                    logger.warning(f"线程 {name} 等待超时")
+                    return False
             logger.info(f"线程 {name} 已停止")
             return True
         else:
             logger.warning(f"线程 {name} 未在运行")
             return False
     
-    def stop_all(self):
-        """停止所有线程"""
+    def wait_for_thread(self, name: str, timeout: Optional[float] = None) -> bool:
+        """等待指定线程完成
+        
+        Args:
+            name: 线程名称
+            timeout: 等待超时时间，None表示无限等待
+        """
+        if name not in self.threads:
+            logger.error(f"线程 {name} 不存在")
+            return False
+            
+        thread = self.threads[name]
+        if thread.is_alive():
+            thread.join(timeout=timeout)
+            if thread.is_alive():
+                logger.warning(f"线程 {name} 等待超时")
+                return False
+            return True
+        return True
+    
+    def stop_all(self, wait: bool = True, timeout: Optional[float] = None):
+        """停止所有线程
+        
+        Args:
+            wait: 是否等待线程完成
+            timeout: 等待超时时间，None表示无限等待
+        """
         for name in list(self.threads.keys()):
-            self.stop_thread(name)
+            self.stop_thread(name, wait=wait, timeout=timeout)
             
     def is_thread_alive(self, name: str) -> bool:
         """检查指定名称的线程是否在运行
