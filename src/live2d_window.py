@@ -151,7 +151,7 @@ class Live2DModelWidget(QOpenGLWidget):
         self.message_queue = []  # 添加消息队列
         
         # 对话气泡相关
-        self.speech_bubble = SpeechBubble(self)  # 确保在初始化时创建气泡
+        self.speech_bubble = None  # 初始化为None
         self.current_speech = None
         self.speech_timer = QTimer()
         self.speech_timer.timeout.connect(self._clear_speech)
@@ -304,6 +304,7 @@ class Live2DModelWidget(QOpenGLWidget):
                 self.speech_bubble = SpeechBubble()
                 self.speech_bubble.show()
                 self.speech_bubble.update_position(self.pos(), self.size())
+                self.speech_bubble.set_text("...")
             
         except Exception as e:
             logger.error(f"加载模型失败: {e}")
@@ -992,13 +993,14 @@ class Live2DModelWidget(QOpenGLWidget):
     def _clear_speech(self):
         """清除对话气泡内容"""
         self.current_speech = None
-        if hasattr(self, 'speech_bubble') and self.speech_bubble is not None:
+        if self.speech_bubble:
             self.speech_bubble.set_text("...")
         
     def show_speech(self, text, duration=5000):
         """显示对话气泡"""
-        if not hasattr(self, 'speech_bubble') or self.speech_bubble is None:
+        if self.speech_bubble is None:
             self.speech_bubble = SpeechBubble(self)
+            self.speech_bubble.show()
             
         self.current_speech = text
         self.speech_bubble.set_text(text)
@@ -1101,6 +1103,9 @@ class Live2DWindow(QWidget):
         
         # 连接模型窗口的关闭信号
         self.model_widget.closed.connect(self.close_input_container)
+        
+        # 显示默认的对话气泡
+        self.model_widget.show_speech("...", duration=0)  # duration=0 表示不自动清除
         
         # 创建输入框和按钮容器
         self.input_container = QWidget(None)
@@ -1861,6 +1866,9 @@ class SpeechBubble(QWidget):
         
         # 设置气泡位置
         self.move(bubble_x, bubble_y)
+        
+        # 确保气泡始终在最上层
+        self.raise_()
 
     def paintEvent(self, event):
         """绘制气泡形状"""

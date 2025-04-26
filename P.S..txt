@@ -11,6 +11,17 @@
 告诉我目前llm模块进度到了什么程度，接下来还有什么内容没有完成
 
 
+(2025.04.27)
+1.重新把气泡弄出来了，但是背景颜色还没调整
+2.修改了两次重复调用tts的问题，重复生成两次语音的问题（结果发现完全不行，修改了反而出现其他的问题，暂时遗留这个问题存在。）【后来我发现，原来是因为今晚刚开始的时候我处理了两个报错导致的后续一系列的问题，如果不处理的话根本没有后续的问题产生】
+
+！！！！！！！！！！！以后请直接忽略这两个报错！！！！！！！！！！！！
+ERROR:src.live2d_window:TTS处理失败: type object 'LocalLLM' has no attribute 'instance'
+ERROR:src.llm.models.local_model:处理TTS回调时出错: type object 'Live2DWindow' has no attribute 'instance'
+！！！！！！！！！！！以后请直接忽略这两个报错！！！！！！！！！！！！
+
+
+
 (2025.04.25)
 1.将HTTP请求改为异步方式
 2.分离LLM生成和TTS处理
