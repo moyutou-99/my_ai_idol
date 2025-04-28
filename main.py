@@ -2,17 +2,23 @@ import sys
 import os
 import asyncio
 import qasync
-from PyQt5.QtWidgets import QApplication
+from PyQt5.QtWidgets import QApplication, QDialog
 from PyQt5.QtCore import QTimer
+from PyQt5.QtGui import QIcon
 import logging
 import traceback
 from concurrent.futures import ThreadPoolExecutor
 
 # 导入前端模块
 from src.live2d_window import Live2DWindow
+from src.auth.auth_ui import LoginDialog, UserProfileWidget
+from src.auth.auth_manager import AuthManager
 
 # 导入后端模块
 from src.backend.server import run_server
+
+# 导入数据库模块
+from database.init_db import init_db
 
 # 配置日志
 logging.basicConfig(
@@ -27,6 +33,9 @@ logger = logging.getLogger(__name__)
 
 # 创建线程池
 executor = ThreadPoolExecutor(max_workers=1)
+
+# 初始化认证管理器
+auth_manager = AuthManager()
 
 async def start_backend_server():
     """启动后端服务器"""
@@ -92,14 +101,32 @@ async def cleanup():
 
 async def main():
     try:
+        # 检查数据库文件是否存在
+        if not os.path.exists(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'database', 'ai_assistant.db')):
+            # 初始化数据库
+            logger.info("数据库不存在，正在初始化...")
+            init_db()
+        else:
+            logger.info("数据库已存在，跳过初始化")
+        
         # 创建QApplication实例
         logger.info("正在创建QApplication实例...")
         app = QApplication(sys.argv)
+        
+        # 设置应用程序图标
+        icon_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'assets', 'icons', '9.png')
+        app.setWindowIcon(QIcon(icon_path))
         
         # 创建事件循环
         logger.info("正在创建事件循环...")
         loop = qasync.QEventLoop(app)
         asyncio.set_event_loop(loop)
+        
+        # 显示登录对话框
+        login_dialog = LoginDialog()
+        if login_dialog.exec_() != QDialog.Accepted:
+            logger.info("用户取消登录，退出程序")
+            return
         
         # 启动后端服务器
         logger.info("正在启动后端服务器...")
@@ -112,6 +139,11 @@ async def main():
         # 创建并显示主窗口
         logger.info("正在创建主窗口...")
         window = Live2DWindow()
+        
+        # 添加用户信息显示
+        user_profile = UserProfileWidget(auth_manager, window)
+        window.add_user_profile_widget(user_profile)
+        
         window.show()
         logger.info("主窗口已显示")
         

@@ -1,7 +1,7 @@
 import sys
-from PyQt5.QtWidgets import QOpenGLWidget, QMenu, QAction, QInputDialog, QTextEdit, QPushButton, QHBoxLayout, QWidget, QVBoxLayout, QApplication, QLabel
-from PyQt5.QtCore import QTimer, Qt, QPoint, QSize, pyqtSignal, QObject
-from PyQt5.QtGui import QPainter, QColor, QLinearGradient, QBrush, QGuiApplication, QCursor, QIcon, QPen, QPainterPath
+from PyQt5.QtWidgets import QOpenGLWidget, QMenu, QAction, QInputDialog, QTextEdit, QPushButton, QHBoxLayout, QWidget, QVBoxLayout, QApplication, QLabel, QMainWindow, QComboBox, QSlider, QSpacerItem, QSizePolicy, QMessageBox
+from PyQt5.QtCore import QTimer, Qt, QPoint, QSize, pyqtSignal, QObject, QRect
+from PyQt5.QtGui import QPainter, QColor, QLinearGradient, QBrush, QGuiApplication, QCursor, QIcon, QPen, QPainterPath, QFont, QFontMetrics
 import aiohttp
 import asyncio
 import qasync
@@ -20,6 +20,7 @@ import requests
 import re
 from concurrent.futures import ThreadPoolExecutor
 import pyaudio
+from src.auth.auth_ui import UserProfileWidget
 
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
@@ -1234,6 +1235,12 @@ class Live2DWindow(QWidget):
         self.is_processing = False
         self.current_text = ""
         
+    def add_user_profile_widget(self, widget):
+        """添加用户信息显示组件"""
+        widget.setParent(self)
+        widget.move(self.width() - widget.width() - 10, 10)
+        widget.show()
+
     def handle_tts_status(self, is_processing):
         """处理TTS状态变化"""
         self.processing_label.setText("语音合成中..." if is_processing else "处理中...")
@@ -1529,6 +1536,11 @@ class Live2DWindow(QWidget):
         # 确保输入框容器和输入框在最顶层
         self.input_container.raise_()
         self.input_box.raise_()
+        
+        # 更新用户信息显示组件的位置
+        for child in self.children():
+            if isinstance(child, UserProfileWidget):
+                child.move(self.width() - child.width() - 10, 10)
         
     def moveEvent(self, event):
         """处理窗口移动事件"""
