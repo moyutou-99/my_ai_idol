@@ -21,6 +21,7 @@ import re
 from concurrent.futures import ThreadPoolExecutor
 import pyaudio
 from src.auth.auth_ui import UserProfileWidget
+from src.agent.factory import AgentFactory
 
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
@@ -43,6 +44,9 @@ class Live2DModelWidget(QOpenGLWidget):
         
         # 存储上一次的位置
         self.last_position = self.pos()
+        
+        # Agent等级
+        self.current_agent_level = 0  # 默认无Agent
         
         # 缩放相关参数
         self.scale_factor = 1.0  # 当前缩放比例
@@ -545,9 +549,9 @@ class Live2DModelWidget(QOpenGLWidget):
         
         menu.addSeparator()
         
-        # 添加模型切换选项
-        model_menu = QMenu("模型切换", self)
-        model_menu.setStyleSheet("""
+        # 添加Agent等级切换选项
+        agent_menu = QMenu("Agent等级", self)
+        agent_menu.setStyleSheet("""
             QMenu {
                 background-color: rgba(255, 255, 255, 230);
                 border: 1px solid #ccc;
@@ -566,6 +570,38 @@ class Live2DModelWidget(QOpenGLWidget):
                 margin: 5px 0px;
             }
         """)
+        menu.addMenu(agent_menu)
+        
+        # 添加Agent等级选项
+        level0_action = QAction("无Agent", self)
+        level0_action.setCheckable(True)
+        level0_action.setChecked(self.current_agent_level == 0)  # 根据当前等级设置选中状态
+        level0_action.triggered.connect(lambda: self.change_agent_level(0))
+        agent_menu.addAction(level0_action)
+        
+        level1_action = QAction("初级Agent", self)
+        level1_action.setCheckable(True)
+        level1_action.setChecked(self.current_agent_level == 1)  # 根据当前等级设置选中状态
+        level1_action.triggered.connect(lambda: self.change_agent_level(1))
+        agent_menu.addAction(level1_action)
+        
+        level2_action = QAction("中级Agent", self)
+        level2_action.setCheckable(True)
+        level2_action.setChecked(self.current_agent_level == 2)  # 根据当前等级设置选中状态
+        level2_action.triggered.connect(lambda: self.change_agent_level(2))
+        agent_menu.addAction(level2_action)
+        
+        level3_action = QAction("高级Agent", self)
+        level3_action.setCheckable(True)
+        level3_action.setChecked(self.current_agent_level == 3)  # 根据当前等级设置选中状态
+        level3_action.triggered.connect(lambda: self.change_agent_level(3))
+        agent_menu.addAction(level3_action)
+        
+        menu.addSeparator()
+        
+        # 添加模型切换选项
+        model_menu = QMenu("模型切换", self)
+        model_menu.setStyleSheet(agent_menu.styleSheet())
         menu.addMenu(model_menu)
         
         # 添加模型选项
@@ -1019,6 +1055,25 @@ class Live2DModelWidget(QOpenGLWidget):
         # 更新状态栏显示
         if hasattr(self, 'status_bar'):
             self.status_bar.showMessage(f"已切换到{model_name}模型", 3000)
+
+    def change_agent_level(self, level: int):
+        """切换Agent等级"""
+        try:
+            # 获取Agent工厂实例
+            factory = AgentFactory.get_instance()
+            
+            # 创建新的Agent实例
+            agent = factory.create_agent(level)
+            
+            # 更新当前Agent等级
+            self.current_agent_level = level
+            
+            # 记录日志
+            logger.info(f"已切换到 {level} 级Agent")
+            
+        except Exception as e:
+            logger.error(f"切换Agent等级失败: {e}")
+            QMessageBox.warning(self, "错误", f"切换Agent等级失败: {str(e)}")
 
 class ModelManager:
     def __init__(self):

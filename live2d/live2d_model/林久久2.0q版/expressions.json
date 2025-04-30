@@ -1,0 +1,64 @@
+{
+    "expressions": {
+        "normal": {
+            "name": "normal",
+            "parameters": [
+                {"id": "ParamEyeLOpen", "value": 1},
+                {"id": "ParamEyeROpen", "value": 1},
+                {"id": "ParamBrowLY", "value": 0},
+                {"id": "ParamBrowRY", "value": 0},
+                {"id": "ParamMouthForm", "value": 0}
+            ]
+        },
+        "happy": {
+            "name": "happy",
+            "parameters": [
+                {"id": "ParamEyeLOpen", "value": 0.8},
+                {"id": "ParamEyeROpen", "value": 0.8},
+                {"id": "ParamBrowLY", "value": 0.2},
+                {"id": "ParamBrowRY", "value": 0.2},
+                {"id": "ParamMouthForm", "value": 1}
+            ]
+        },
+        "sad": {
+            "name": "sad",
+            "parameters": [
+                {"id": "ParamEyeLOpen", "value": 0.8},
+                {"id": "ParamEyeROpen", "value": 0.8},
+                {"id": "ParamBrowLY", "value": -0.2},
+                {"id": "ParamBrowRY", "value": -0.2},
+                {"id": "ParamMouthForm", "value": -1}
+            ]
+        },
+        "angry": {
+            "name": "angry",
+            "parameters": [
+                {"id": "ParamEyeLOpen", "value": 1.2},
+                {"id": "ParamEyeROpen", "value": 1.2},
+                {"id": "ParamBrowLY", "value": -0.4},
+                {"id": "ParamBrowRY", "value": -0.4},
+                {"id": "ParamMouthForm", "value": -0.8}
+            ]
+        },
+        "surprised": {
+            "name": "surprised",
+            "parameters": [
+                {"id": "ParamEyeLOpen", "value": 1.3},
+                {"id": "ParamEyeROpen", "value": 1.3},
+                {"id": "ParamBrowLY", "value": 0.4},
+                {"id": "ParamBrowRY", "value": 0.4},
+                {"id": "ParamMouthForm", "value": 0}
+            ]
+        },
+        "shy": {
+            "name": "shy",
+            "parameters": [
+                {"id": "ParamEyeLOpen", "value": 0.7},
+                {"id": "ParamEyeROpen", "value": 0.7},
+                {"id": "ParamBrowLY", "value": 0.1},
+                {"id": "ParamBrowRY", "value": 0.1},
+                {"id": "ParamMouthForm", "value": -0.2}
+            ]
+        }
+    }
+} 
