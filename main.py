@@ -1,3 +1,6 @@
+# 控制是否显示登录界面
+SHOW_LOGIN_DIALOG = False  # True: 显示登录界面, False: 不显示登录界面
+
 import sys
 import os
 import asyncio
@@ -8,7 +11,6 @@ from PyQt5.QtGui import QIcon
 import logging
 import traceback
 from concurrent.futures import ThreadPoolExecutor
-
 # 导入前端模块
 from src.live2d_window import Live2DWindow
 from src.auth.auth_ui import LoginDialog, UserProfileWidget
@@ -123,10 +125,11 @@ async def main():
         asyncio.set_event_loop(loop)
         
         # 显示登录对话框
-        login_dialog = LoginDialog()
-        if login_dialog.exec_() != QDialog.Accepted:
-            logger.info("用户取消登录，退出程序")
-            return
+        if SHOW_LOGIN_DIALOG:
+            login_dialog = LoginDialog()
+            if login_dialog.exec_() != QDialog.Accepted:
+                logger.info("用户取消登录，退出程序")
+                return
         
         # 启动后端服务器
         logger.info("正在启动后端服务器...")

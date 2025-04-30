@@ -69,7 +69,7 @@ class LoginDialog(QDialog):
         
         # 密码输入
         password_layout = QHBoxLayout()
-        password_label = QLabel('密码:')
+        password_label = QLabel('密 码:')
         self.password_input = QLineEdit()
         self.password_input.setEchoMode(QLineEdit.Password)
         self.password_input.setPlaceholderText('请输入密码')
