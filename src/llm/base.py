@@ -12,7 +12,9 @@ import re
 import threading
 import asyncio
 import time
+import json
 from src.utils.thread_manager import ThreadManager
+from src.agent.factory import AgentFactory
 
 # 获取项目根目录
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -388,7 +390,7 @@ class LLMConfig:
                 yield None, current_emotion
 
 class BaseLLM(ABC):
-    """基础LLM接口"""
+    """LLM基类，定义了所有LLM模型必须实现的基本接口"""
     
     def __init__(self):
         # TTS相关配置
@@ -410,6 +412,26 @@ class BaseLLM(ABC):
             EmotionType.ANGRY: "angry",
             EmotionType.SAD: "depressed"
         }
+        
+        # Agent相关配置
+        self.agent_factory = AgentFactory.get_instance()
+        self.current_agent = None
+        self.tool_prompt = """你是一个AI助手，可以根据用户的需求调用各种工具。
+可用的工具列表：
+{tools}
+
+请根据用户的需求，选择合适的工具并调用。调用格式为：
+<tool_call>
+{{
+    "tool": "工具名称",
+    "parameters": {{
+        "参数1": "值1",
+        "参数2": "值2"
+    }}
+}}
+</tool_call>
+
+如果不需要调用工具，直接回复用户即可。"""
     
     def _map_emotion_to_tts(self, emotion: EmotionType) -> str:
         """将情绪类型映射到TTS情感"""
@@ -425,14 +447,108 @@ class BaseLLM(ABC):
         if self.tts_status_changed:
             self.tts_status_changed(is_processing)
     
+    def set_agent_level(self, level: int) -> None:
+        """设置当前agent等级
+        
+        Args:
+            level: agent等级（0-3）
+        """
+        self.current_agent = self.agent_factory.create_agent(level)
+    
+    def _get_tools_prompt(self) -> str:
+        """获取当前可用工具的提示词
+        
+        Returns:
+            str: 工具提示词
+        """
+        if self.current_agent is None:
+            return "当前没有可用的工具。"
+        
+        tools = self.current_agent.get_all_tools()
+        tool_descriptions = []
+        
+        for name, func in tools.items():
+            # 获取函数的文档字符串
+            doc = func.__doc__ or "无描述"
+            # 获取函数的参数信息
+            params = []
+            for param_name, param in func.__annotations__.items():
+                if param_name != 'return':
+                    params.append(f"{param_name}: {param.__name__}")
+            
+            tool_descriptions.append(f"- {name}: {doc}\n  参数: {', '.join(params)}")
+        
+        return self.tool_prompt.format(tools="\n".join(tool_descriptions))
+    
+    async def _process_tool_call(self, tool_call: str) -> str:
+        """处理工具调用
+        
+        Args:
+            tool_call: 工具调用字符串
+            
+        Returns:
+            str: 工具执行结果
+        """
+        try:
+            # 解析工具调用
+            tool_data = json.loads(tool_call)
+            tool_name = tool_data["tool"]
+            parameters = tool_data["parameters"]
+            
+            # 获取工具函数
+            tool_func = self.current_agent.get_tool(tool_name)
+            if tool_func is None:
+                return f"错误：找不到工具 {tool_name}"
+            
+            # 调用工具
+            result = await tool_func(**parameters)
+            return str(result)
+            
+        except Exception as e:
+            return f"工具调用错误：{str(e)}"
+    
+    async def _process_response(self, response: str) -> str:
+        """处理LLM的响应，包括工具调用
+        
+        Args:
+            response: LLM的原始响应
+            
+        Returns:
+            str: 处理后的响应
+        """
+        # 检查是否包含工具调用
+        tool_call_match = re.search(r'<tool_call>(.*?)</tool_call>', response, re.DOTALL)
+        if tool_call_match:
+            # 提取工具调用部分
+            tool_call = tool_call_match.group(1).strip()
+            # 处理工具调用
+            tool_result = await self._process_tool_call(tool_call)
+            # 替换工具调用为结果
+            response = response.replace(tool_call_match.group(0), f"工具执行结果：{tool_result}")
+        
+        return response
+    
     @abstractmethod
     async def chat(self, prompt: str, **kwargs) -> str:
-        """生成回复"""
+        """与LLM进行对话
+        
+        Args:
+            prompt: 用户输入
+            **kwargs: 其他参数
+            
+        Returns:
+            str: LLM的回复
+        """
         pass
     
     @abstractmethod
     async def stream_chat(self, prompt: str, **kwargs):
-        """流式生成回复"""
+        """与LLM进行流式对话
+        
+        Args:
+            prompt: 用户输入
+            **kwargs: 其他参数
+        """
         pass
         
     def _split_text(self, text: str) -> List[str]:

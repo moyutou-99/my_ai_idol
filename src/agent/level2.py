@@ -1,16 +1,29 @@
 from typing import Optional, Dict, Any
-from .base import BaseAgent
+from .level1 import Level1Agent
 
-class Level2Agent(BaseAgent):
-    """二级AI代理，实现中级功能"""
+class Level2Agent(Level1Agent):
+    """二级AI代理，继承一级代理的功能并添加新功能"""
     
-    def __init__(self, config: Optional[Dict[str, Any]] = None):
-        super().__init__(config)
-        print("已切换到2级agent，当前可用功能有：1级agent的全部功能，帮助打开文件功能（暂时只支持桌面有的文件），屏幕点击功能等")
+    def __init__(self, level: int):
+        super().__init__(level)
+        print("已切换至2级agent，当前可用功能有1级agent的全部功能，新增功能：音乐播放，文件管理，系统控制等")
+    
+    def initialize_tools(self) -> None:
+        """初始化2级agent的工具集"""
+        # 先调用父类的工具初始化
+        super().initialize_tools()
+        pass
     
     async def process_message(self, message: str) -> str:
-        """处理用户消息"""
-        return "2级agent已收到消息"
+        """处理用户输入的消息
+        
+        Args:
+            message: 用户输入的消息
+            
+        Returns:
+            str: AI的回复
+        """
+        return f"2级agent收到消息：{message}"
     
     async def initialize(self) -> None:
         """初始化代理"""

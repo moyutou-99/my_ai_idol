@@ -29,8 +29,15 @@ class ApiLLM(BaseLLM):
         """生成回复"""
         try:
             async with aiohttp.ClientSession() as session:
-                # 格式化提示词
-                formatted_prompt = LLMConfig.format_prompt(prompt)
+                # 构建基础提示词
+                base_prompt = LLMConfig.format_prompt(prompt)
+                
+                # 如果当前有agent，添加工具提示词
+                if self.current_agent is not None:
+                    tools_prompt = self._get_tools_prompt()
+                    formatted_prompt = f"{tools_prompt}\n\n{base_prompt}"
+                else:
+                    formatted_prompt = base_prompt
                 
                 # 根据API类型构建不同的请求数据
                 if self.api_type == "deepseek":
@@ -64,6 +71,10 @@ class ApiLLM(BaseLLM):
                         elif self.api_type == "ph":
                             content = result["choices"][0]["message"]["content"]
                             
+                        # 处理工具调用
+                        if self.current_agent is not None:
+                            content = await self._process_response(content)
+                            
                         # 使用LLMConfig处理输出
                         formatted_response = LLMConfig.process_output(content)
                         
@@ -87,8 +98,15 @@ class ApiLLM(BaseLLM):
         """流式生成回复"""
         try:
             async with aiohttp.ClientSession() as session:
-                # 格式化提示词
-                formatted_prompt = LLMConfig.format_prompt(prompt)
+                # 构建基础提示词
+                base_prompt = LLMConfig.format_prompt(prompt)
+                
+                # 如果当前有agent，添加工具提示词
+                if self.current_agent is not None:
+                    tools_prompt = self._get_tools_prompt()
+                    formatted_prompt = f"{tools_prompt}\n\n{base_prompt}"
+                else:
+                    formatted_prompt = base_prompt
                 
                 # 根据API类型构建不同的请求数据
                 if self.api_type == "deepseek":
@@ -128,18 +146,24 @@ class ApiLLM(BaseLLM):
                                             if "content" in delta:
                                                 content = delta["content"]
                                                 full_content += content
+                                                # 处理工具调用
+                                                if self.current_agent is not None:
+                                                    content = await self._process_response(content)
                                                 # 使用LLMConfig处理流式输出
                                                 formatted_content, current_emotion = await LLMConfig.process_stream_output(content, current_emotion)
-                                                yield formatted_content
+                                                yield formatted_content, current_emotion
                                     elif self.api_type == "ph":
                                         if "choices" in json_line and len(json_line["choices"]) > 0:
                                             delta = json_line["choices"][0].get("delta", {})
                                             if "content" in delta:
                                                 content = delta["content"]
                                                 full_content += content
+                                                # 处理工具调用
+                                                if self.current_agent is not None:
+                                                    content = await self._process_response(content)
                                                 # 使用LLMConfig处理流式输出
                                                 formatted_content, current_emotion = await LLMConfig.process_stream_output(content, current_emotion)
-                                                yield formatted_content
+                                                yield formatted_content, current_emotion
                                 except json.JSONDecodeError:
                                     continue
                     else:

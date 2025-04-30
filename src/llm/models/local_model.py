@@ -38,6 +38,7 @@ class LocalLLM(BaseLLM):
         self.model = None
         self.tokenizer = None
         self.history = []
+        self.current_agent = None
         
     def _log_memory_usage(self, stage: str):
         """记录显存使用情况"""
@@ -139,7 +140,14 @@ class LocalLLM(BaseLLM):
             self.history.append({"role": "user", "content": message})
             
             # 构建完整的提示词
-            prompt = LLMConfig.format_prompt(message)
+            base_prompt = LLMConfig.format_prompt(message)
+            
+            # 如果当前有agent，添加工具提示词
+            if self.current_agent is not None:
+                tools_prompt = self._get_tools_prompt()
+                prompt = f"{tools_prompt}\n\n{base_prompt}"
+            else:
+                prompt = base_prompt
             
             # 使用共享方法生成回复
             full_response = await LLMConfig.generate_response(
@@ -157,6 +165,10 @@ class LocalLLM(BaseLLM):
                 if not response:
                     response = "抱歉，我需要一点时间来思考这个问题。"
                     logger.warning("生成的回复为空，返回默认回复")
+                
+                # 处理工具调用
+                if self.current_agent is not None:
+                    response = await self._process_response(response)
                 
                 # 使用LLMConfig处理输出
                 formatted_response = LLMConfig.process_output(response)
@@ -190,7 +202,14 @@ class LocalLLM(BaseLLM):
             self._log_memory_usage("流式生成前")
             
             # 构建输入
-            formatted_prompt = LLMConfig.format_prompt(prompt)
+            base_prompt = LLMConfig.format_prompt(prompt)
+            
+            # 如果当前有agent，添加工具提示词
+            if self.current_agent is not None:
+                tools_prompt = self._get_tools_prompt()
+                formatted_prompt = f"{tools_prompt}\n\n{base_prompt}"
+            else:
+                formatted_prompt = base_prompt
             
             # 使用共享方法进行流式生成
             async for formatted_content, current_emotion in LLMConfig.generate_stream_response(
@@ -200,15 +219,15 @@ class LocalLLM(BaseLLM):
                 device=self.device,
                 **kwargs
             ):
+                # 处理工具调用
+                if self.current_agent is not None:
+                    formatted_content = await self._process_response(formatted_content)
+                
                 yield formatted_content, current_emotion
-            
-            # 更新历史记录
-            self.history.append({"role": "user", "content": prompt})
-            self._log_memory_usage("流式生成后")
-            
+                
         except Exception as e:
-            logger.error(f"本地模型流式生成失败: {str(e)}")
-            yield None, EmotionType.NORMAL 
+            logger.error(f"流式生成回复时发生错误: {str(e)}", exc_info=True)
+            yield f"抱歉，生成回复时出现错误: {str(e)}", EmotionType.NORMAL
 
     async def _handle_tts_callback(self, text: str, audio_data: bytes):
         """处理TTS回调，更新UI显示当前播放的文本"""
