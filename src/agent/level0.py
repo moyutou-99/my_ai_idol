@@ -30,4 +30,4 @@ class Level0Agent(BaseAgent):
     
     def has_permission(self, permission: str) -> bool:
         """无Agent无任何权限"""
-        return False 
+        return False

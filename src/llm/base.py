@@ -417,10 +417,21 @@ class BaseLLM(ABC):
         self.agent_factory = AgentFactory.get_instance()
         self.current_agent = None
         self.tool_prompt = """你是一个AI助手，可以根据用户的需求调用各种工具。
-可用的工具列表：
+当前可用的工具列表：
 {tools}
 
-请根据用户的需求，选择合适的工具并调用。调用格式为：
+请根据用户的需求，选择合适的工具并调用。你可以使用以下两种格式之一：
+
+1. JSON格式（推荐）：
+{{
+    "tool": "工具名称",
+    "parameters": {{
+        "参数1": "值1",
+        "参数2": "值2"
+    }}
+}}
+
+2. XML格式：
 <tool_call>
 {{
     "tool": "工具名称",
@@ -430,6 +441,15 @@ class BaseLLM(ABC):
     }}
 }}
 </tool_call>
+
+对于天气查询，你应该：
+1. 从用户输入中提取地点信息
+2. 如果找到地点，使用该地点作为location参数
+3. 如果没有找到地点，使用默认地点（北京）
+
+示例：
+用户：今天北京天气怎么样？
+回复：{{"tool": "get_weather", "parameters": {{"location": "北京"}}}}
 
 如果不需要调用工具，直接回复用户即可。"""
     
@@ -490,21 +510,42 @@ class BaseLLM(ABC):
             str: 工具执行结果
         """
         try:
+            logger.info(f"开始处理工具调用: {tool_call}")
             # 解析工具调用
             tool_data = json.loads(tool_call)
             tool_name = tool_data["tool"]
             parameters = tool_data["parameters"]
             
+            logger.info(f"解析工具调用 - 工具名称: {tool_name}, 参数: {parameters}")
+            
             # 获取工具函数
+            if self.current_agent is None:
+                logger.error("当前没有可用的agent")
+                return "错误：当前没有可用的agent"
+                
             tool_func = self.current_agent.get_tool(tool_name)
             if tool_func is None:
+                logger.error(f"找不到工具: {tool_name}")
                 return f"错误：找不到工具 {tool_name}"
             
+            logger.info(f"开始执行工具: {tool_name}")
             # 调用工具
-            result = await tool_func(**parameters)
+            if tool_name == "get_weather":
+                # 特殊处理天气查询
+                location = parameters.get("location", None)
+                logger.info(f"执行天气查询，地点: {location}")
+                result = await self.current_agent.process_message(f"{location}的天气" if location else "天气")
+            else:
+                result = await tool_func(**parameters)
+            
+            logger.info(f"工具执行完成，结果: {result}")
             return str(result)
             
+        except json.JSONDecodeError as e:
+            logger.error(f"工具调用格式错误: {tool_call}, 错误: {str(e)}")
+            return f"工具调用格式错误：{tool_call}"
         except Exception as e:
+            logger.error(f"工具调用错误: {str(e)}", exc_info=True)
             return f"工具调用错误：{str(e)}"
     
     async def _process_response(self, response: str) -> str:
@@ -516,16 +557,32 @@ class BaseLLM(ABC):
         Returns:
             str: 处理后的响应
         """
+        logger.info(f"开始处理LLM响应: {response}")
         # 检查是否包含工具调用
+        if response.startswith("{") and response.endswith("}"):
+            try:
+                logger.info("检测到JSON格式的工具调用")
+                # 尝试解析JSON格式的工具调用
+                tool_result = await self._process_tool_call(response)
+                logger.info(f"JSON工具调用处理完成，结果: {tool_result}")
+                return tool_result
+            except Exception as e:
+                logger.warning(f"JSON工具调用解析失败: {str(e)}")
+                pass
+                
         tool_call_match = re.search(r'<tool_call>(.*?)</tool_call>', response, re.DOTALL)
         if tool_call_match:
+            logger.info("检测到XML格式的工具调用")
             # 提取工具调用部分
             tool_call = tool_call_match.group(1).strip()
+            logger.info(f"提取到的工具调用内容: {tool_call}")
             # 处理工具调用
             tool_result = await self._process_tool_call(tool_call)
+            logger.info(f"XML工具调用处理完成，结果: {tool_result}")
             # 替换工具调用为结果
-            response = response.replace(tool_call_match.group(0), f"工具执行结果：{tool_result}")
+            response = response.replace(tool_call_match.group(0), tool_result)
         
+        logger.info(f"响应处理完成，最终结果: {response}")
         return response
     
     @abstractmethod

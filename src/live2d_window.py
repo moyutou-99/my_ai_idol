@@ -22,6 +22,7 @@ from concurrent.futures import ThreadPoolExecutor
 import pyaudio
 from src.auth.auth_ui import UserProfileWidget
 from src.agent.factory import AgentFactory
+from src.llm.models import ModelManager
 
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
@@ -47,6 +48,9 @@ class Live2DModelWidget(QOpenGLWidget):
         
         # Agent等级
         self.current_agent_level = 0  # 默认无Agent
+        
+        # 初始化ModelManager
+        self.model_manager = ModelManager()
         
         # 缩放相关参数
         self.scale_factor = 1.0  # 当前缩放比例
@@ -164,7 +168,6 @@ class Live2DModelWidget(QOpenGLWidget):
         
         # 初始化模型状态
         self.current_model = "local"  # 默认使用本地模型
-        self.model_manager = ModelManager()
         
     def initializeGL(self):
         """初始化OpenGL"""
@@ -575,25 +578,25 @@ class Live2DModelWidget(QOpenGLWidget):
         # 添加Agent等级选项
         level0_action = QAction("无Agent", self)
         level0_action.setCheckable(True)
-        level0_action.setChecked(self.current_agent_level == 0)  # 根据当前等级设置选中状态
+        level0_action.setChecked(self.current_agent_level == 0)
         level0_action.triggered.connect(lambda: self.change_agent_level(0))
         agent_menu.addAction(level0_action)
         
         level1_action = QAction("初级Agent", self)
         level1_action.setCheckable(True)
-        level1_action.setChecked(self.current_agent_level == 1)  # 根据当前等级设置选中状态
+        level1_action.setChecked(self.current_agent_level == 1)
         level1_action.triggered.connect(lambda: self.change_agent_level(1))
         agent_menu.addAction(level1_action)
         
         level2_action = QAction("中级Agent", self)
         level2_action.setCheckable(True)
-        level2_action.setChecked(self.current_agent_level == 2)  # 根据当前等级设置选中状态
+        level2_action.setChecked(self.current_agent_level == 2)
         level2_action.triggered.connect(lambda: self.change_agent_level(2))
         agent_menu.addAction(level2_action)
         
         level3_action = QAction("高级Agent", self)
         level3_action.setCheckable(True)
-        level3_action.setChecked(self.current_agent_level == 3)  # 根据当前等级设置选中状态
+        level3_action.setChecked(self.current_agent_level == 3)
         level3_action.triggered.connect(lambda: self.change_agent_level(3))
         agent_menu.addAction(level3_action)
         
@@ -1059,80 +1062,26 @@ class Live2DModelWidget(QOpenGLWidget):
     def change_agent_level(self, level: int):
         """切换Agent等级"""
         try:
+            # 更新当前agent等级
+            self.current_agent_level = level
+            
             # 获取Agent工厂实例
             factory = AgentFactory.get_instance()
             
             # 创建新的Agent实例
             agent = factory.create_agent(level)
             
-            # 更新当前Agent等级
-            self.current_agent_level = level
-            
-            # 记录日志
-            logger.info(f"已切换到 {level} 级Agent")
+            # 设置到ModelManager中
+            if hasattr(self, 'model_manager'):
+                self.model_manager.set_agent_level(level)
+                logger.info(f"已切换到 {level} 级Agent")
+            else:
+                logger.error("ModelManager未初始化")
+                QMessageBox.warning(self, "错误", "ModelManager未初始化")
             
         except Exception as e:
             logger.error(f"切换Agent等级失败: {e}")
             QMessageBox.warning(self, "错误", f"切换Agent等级失败: {str(e)}")
-
-class ModelManager:
-    def __init__(self):
-        # 初始化模型状态
-        self.current_model = "local"
-        self.supported_models = {
-            "local": "本地模型",
-            "deepseek": "D老师",
-            "ph": "幻日"
-        }
-        
-    def switch_model(self, model_name):
-        """切换模型"""
-        try:
-            if model_name not in self.supported_models:
-                logger.error(f"不支持的模型类型: {model_name}")
-                return False
-                
-            if model_name == self.current_model:
-                logger.info(f"已经是{self.supported_models[model_name]}模型，无需切换")
-                return True
-                
-            # 发送HTTP请求到后端API进行模型切换
-            try:
-                if model_name == "deepseek":
-                    response = requests.post("http://localhost:8000/api/deepseek/load")
-                elif model_name == "ph":
-                    response = requests.post("http://localhost:8000/api/ph/load")
-                else:
-                    response = requests.post("http://localhost:8000/api/local/load")
-                    
-                if response.status_code == 200:
-                    result = response.json()
-                    if result.get("status") == "success":
-                        self.current_model = model_name
-                        logger.info(f"成功切换到{self.supported_models[model_name]}模型")
-                        return True
-                    else:
-                        error_msg = result.get("message", "未知错误")
-                        logger.error(f"模型切换失败: {error_msg}")
-                        return False
-                else:
-                    logger.error(f"模型切换请求失败，状态码: {response.status_code}")
-                    return False
-                    
-            except requests.exceptions.RequestException as e:
-                logger.error(f"模型切换请求失败: {e}")
-                return False
-                
-        except Exception as e:
-            logger.error(f"模型切换过程中发生错误: {e}")
-            return False
-            
-    def get_current_model_info(self):
-        """获取当前模型信息"""
-        return {
-            "name": self.current_model,
-            "display_name": self.supported_models.get(self.current_model, "未知模型")
-        }
 
 class Live2DWindow(QWidget):
     """主窗口，包含Live2D模型和输入框"""
@@ -1147,6 +1096,9 @@ class Live2DWindow(QWidget):
         self.setGeometry(100, 100, 800, 640)
         self.setWindowFlags(Qt.Window | Qt.Tool | Qt.WindowStaysOnTopHint | Qt.FramelessWindowHint)
         self.setAttribute(Qt.WA_TranslucentBackground)
+        
+        # 初始化agent等级
+        self.current_agent_level = 0
         
         # 创建主布局
         self.main_layout = QVBoxLayout(self)
@@ -1689,6 +1641,33 @@ class Live2DWindow(QWidget):
         """处理TTS状态变化"""
         self.processing_label.setText("语音合成中..." if is_processing else "处理中...")
         self.processing_label.setVisible(is_processing)
+
+    def set_agent_level(self, level: int):
+        """设置agent等级
+        
+        Args:
+            level: agent等级（0-3）
+        """
+        try:
+            # 更新当前agent等级
+            self.current_agent_level = level
+            
+            # 获取Agent工厂实例
+            factory = AgentFactory.get_instance()
+            
+            # 创建新的Agent实例
+            agent = factory.create_agent(level)
+            
+            # 设置到ModelManager中
+            if hasattr(self, 'model_widget') and hasattr(self.model_widget, 'model_manager'):
+                self.model_widget.model_manager.set_agent_level(level)
+            
+            # 记录日志
+            logger.info(f"已切换到 {level} 级Agent")
+            
+        except Exception as e:
+            logger.error(f"切换Agent等级失败: {e}")
+            QMessageBox.warning(self, "错误", f"切换Agent等级失败: {str(e)}")
 
 class ChatWindow(QWidget):
     """聊天窗口类"""

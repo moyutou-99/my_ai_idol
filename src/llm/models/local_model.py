@@ -127,7 +127,7 @@ class LocalLLM(BaseLLM):
                 logger.exception("详细错误信息：")
                 raise
             
-    async def chat(self, message: str) -> str:
+    async def chat(self, message: str, require_agent: bool = False) -> str:
         """生成回复"""
         try:
             # 确保模型已加载
@@ -142,13 +142,17 @@ class LocalLLM(BaseLLM):
             # 构建完整的提示词
             base_prompt = LLMConfig.format_prompt(message)
             
-            # 如果当前有agent，添加工具提示词
-            if self.current_agent is not None:
+            # 如果当前有agent或require_agent为True，添加工具提示词
+            if self.current_agent is not None or require_agent:
+                logger.info("当前有agent或require_agent为True，准备添加工具提示词")
                 tools_prompt = self._get_tools_prompt()
+                logger.info(f"工具提示词: {tools_prompt}")
                 prompt = f"{tools_prompt}\n\n{base_prompt}"
             else:
+                logger.info("当前没有agent且require_agent为False，使用基础提示词")
                 prompt = base_prompt
             
+            logger.info(f"最终提示词长度: {len(prompt)}")
             # 使用共享方法生成回复
             full_response = await LLMConfig.generate_response(
                 self.model,
@@ -160,6 +164,7 @@ class LocalLLM(BaseLLM):
             # 提取助手的回复
             try:
                 response = self._extract_last_assistant_response(full_response)
+                logger.info(f"提取到的助手回复: {response}")
                 
                 # 如果回复为空，返回默认回复
                 if not response:
@@ -167,34 +172,39 @@ class LocalLLM(BaseLLM):
                     logger.warning("生成的回复为空，返回默认回复")
                 
                 # 处理工具调用
-                if self.current_agent is not None:
+                if self.current_agent is not None or require_agent:
+                    logger.info("开始处理工具调用")
                     response = await self._process_response(response)
+                    logger.info(f"工具调用处理完成，结果: {response}")
                 
                 # 使用LLMConfig处理输出
                 formatted_response = LLMConfig.process_output(response)
+                logger.info(f"格式化后的回复: {formatted_response}")
                 
                 # 更新对话历史
                 self.history.append({"role": "assistant", "content": formatted_response})
                 
                 # 转换为语音并保存
+                logger.info("开始转换为语音")
                 await self.text_to_speech(
                     formatted_response, 
                     save_to_file=True,
                     play_audio=True,
                     on_chunk_callback=lambda text, audio_data: self._handle_tts_callback(text, audio_data)
                 )
+                logger.info("语音转换完成")
                 
                 return formatted_response
                 
             except Exception as e:
-                logger.error(f"提取助手回复时出错: {e}")
+                logger.error(f"提取助手回复时出错: {e}", exc_info=True)
                 return "抱歉，我现在遇到了一些问题，请稍后再试。"
 
         except Exception as e:
             logger.error(f"生成回复时发生错误: {str(e)}", exc_info=True)
             return f"抱歉，生成回复时出现错误: {str(e)}"
             
-    async def stream_chat(self, prompt: str, **kwargs):
+    async def stream_chat(self, prompt: str, require_agent: bool = False, **kwargs):
         """流式生成回复"""
         try:
             await self.load_model()
@@ -204,11 +214,14 @@ class LocalLLM(BaseLLM):
             # 构建输入
             base_prompt = LLMConfig.format_prompt(prompt)
             
-            # 如果当前有agent，添加工具提示词
-            if self.current_agent is not None:
+            # 如果当前有agent或require_agent为True，添加工具提示词
+            if self.current_agent is not None or require_agent:
+                logger.info("当前有agent或require_agent为True，准备添加工具提示词")
                 tools_prompt = self._get_tools_prompt()
+                logger.info(f"工具提示词: {tools_prompt}")
                 formatted_prompt = f"{tools_prompt}\n\n{base_prompt}"
             else:
+                logger.info("当前没有agent且require_agent为False，使用基础提示词")
                 formatted_prompt = base_prompt
             
             # 使用共享方法进行流式生成
@@ -220,11 +233,13 @@ class LocalLLM(BaseLLM):
                 **kwargs
             ):
                 # 处理工具调用
-                if self.current_agent is not None:
+                if self.current_agent is not None or require_agent:
+                    logger.info("开始处理工具调用")
                     formatted_content = await self._process_response(formatted_content)
+                    logger.info(f"工具调用处理完成，结果: {formatted_content}")
                 
                 yield formatted_content, current_emotion
-                
+            
         except Exception as e:
             logger.error(f"流式生成回复时发生错误: {str(e)}", exc_info=True)
             yield f"抱歉，生成回复时出现错误: {str(e)}", EmotionType.NORMAL

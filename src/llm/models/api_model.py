@@ -25,18 +25,21 @@ class ApiLLM(BaseLLM):
             "Content-Type": "application/json"
         }
         
-    async def chat(self, prompt: str, **kwargs) -> str:
+    async def chat(self, prompt: str, require_agent: bool = False, **kwargs) -> str:
         """生成回复"""
         try:
             async with aiohttp.ClientSession() as session:
                 # 构建基础提示词
                 base_prompt = LLMConfig.format_prompt(prompt)
                 
-                # 如果当前有agent，添加工具提示词
-                if self.current_agent is not None:
+                # 如果当前有agent或require_agent为True，添加工具提示词
+                if self.current_agent is not None or require_agent:
+                    logger.info("当前有agent或require_agent为True，准备添加工具提示词")
                     tools_prompt = self._get_tools_prompt()
+                    logger.info(f"工具提示词: {tools_prompt}")
                     formatted_prompt = f"{tools_prompt}\n\n{base_prompt}"
                 else:
+                    logger.info("当前没有agent且require_agent为False，使用基础提示词")
                     formatted_prompt = base_prompt
                 
                 # 根据API类型构建不同的请求数据
@@ -72,8 +75,10 @@ class ApiLLM(BaseLLM):
                             content = result["choices"][0]["message"]["content"]
                             
                         # 处理工具调用
-                        if self.current_agent is not None:
+                        if self.current_agent is not None or require_agent:
+                            logger.info("开始处理工具调用")
                             content = await self._process_response(content)
+                            logger.info(f"工具调用处理完成，结果: {content}")
                             
                         # 使用LLMConfig处理输出
                         formatted_response = LLMConfig.process_output(content)
@@ -94,18 +99,21 @@ class ApiLLM(BaseLLM):
         except Exception as e:
             raise Exception(f"API调用失败: {str(e)}")
             
-    async def stream_chat(self, prompt: str, **kwargs):
+    async def stream_chat(self, prompt: str, require_agent: bool = False, **kwargs):
         """流式生成回复"""
         try:
             async with aiohttp.ClientSession() as session:
                 # 构建基础提示词
                 base_prompt = LLMConfig.format_prompt(prompt)
                 
-                # 如果当前有agent，添加工具提示词
-                if self.current_agent is not None:
+                # 如果当前有agent或require_agent为True，添加工具提示词
+                if self.current_agent is not None or require_agent:
+                    logger.info("当前有agent或require_agent为True，准备添加工具提示词")
                     tools_prompt = self._get_tools_prompt()
+                    logger.info(f"工具提示词: {tools_prompt}")
                     formatted_prompt = f"{tools_prompt}\n\n{base_prompt}"
                 else:
+                    logger.info("当前没有agent且require_agent为False，使用基础提示词")
                     formatted_prompt = base_prompt
                 
                 # 根据API类型构建不同的请求数据
@@ -147,8 +155,10 @@ class ApiLLM(BaseLLM):
                                                 content = delta["content"]
                                                 full_content += content
                                                 # 处理工具调用
-                                                if self.current_agent is not None:
+                                                if self.current_agent is not None or require_agent:
+                                                    logger.info("开始处理工具调用")
                                                     content = await self._process_response(content)
+                                                    logger.info(f"工具调用处理完成，结果: {content}")
                                                 # 使用LLMConfig处理流式输出
                                                 formatted_content, current_emotion = await LLMConfig.process_stream_output(content, current_emotion)
                                                 yield formatted_content, current_emotion
@@ -159,8 +169,10 @@ class ApiLLM(BaseLLM):
                                                 content = delta["content"]
                                                 full_content += content
                                                 # 处理工具调用
-                                                if self.current_agent is not None:
+                                                if self.current_agent is not None or require_agent:
+                                                    logger.info("开始处理工具调用")
                                                     content = await self._process_response(content)
+                                                    logger.info(f"工具调用处理完成，结果: {content}")
                                                 # 使用LLMConfig处理流式输出
                                                 formatted_content, current_emotion = await LLMConfig.process_stream_output(content, current_emotion)
                                                 yield formatted_content, current_emotion
