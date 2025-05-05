@@ -102,7 +102,7 @@ class Level1Agent(BaseAgent):
                         logger.info(f"搜索到城市ID并更新缓存: {location} -> {city_id}")
                     else:
                         logger.warning(f"未找到城市: {location}")
-                        return f"未找到城市：{location}"
+                        return f"喵~抱歉，我没有找到{location}的天气信息喵~"
             
             logger.info(f"使用城市ID查询天气: {location_id}")
             # 构建请求URL
@@ -133,44 +133,69 @@ class Level1Agent(BaseAgent):
                                 if data["code"] == "200":
                                     now = data["now"]
                                     logger.info(f"成功获取天气数据: {now}")
-                                    # 构建完整的天气信息
-                                    weather_info = [
-                                        f"当前天气：{now['text']}",
-                                        f"温度：{now['temp']}°C",
-                                        f"体感温度：{now['feelsLike']}°C",
-                                        f"湿度：{now['humidity']}%",
-                                        f"风向：{now['windDir']}",
-                                        f"风力等级：{now['windScale']}级",
-                                        f"风速：{now['windSpeed']}km/h",
-                                        f"降水量：{now['precip']}mm",
-                                        f"气压：{now['pressure']}hPa",
-                                        f"能见度：{now['vis']}km",
-                                        f"云量：{now.get('cloud', 'N/A')}%",
-                                        f"露点温度：{now.get('dew', 'N/A')}°C",
-                                        f"更新时间：{now['obsTime']}"
-                                    ]
-                                    result = "\n".join(weather_info)
-                                    logger.info(f"天气查询结果: {result}")
-                                    return result
+                                    
+                                    # 构建友好的天气描述
+                                    friendly_weather = f"喵~让我看看{location}的天气情况喵~\n"
+                                    friendly_weather += f"今天{location}的天气是{now['text']}，温度{now['temp']}°C喵~\n"
+                                    friendly_weather += f"湿度：{now['humidity']}%\n"
+                                    friendly_weather += f"风向：{now['windDir']}，风力{now['windScale']}级\n"
+                                    
+                                    # 根据天气情况添加建议
+                                    temp = float(now['temp'])
+                                    if temp > 30:
+                                        friendly_weather += "天气很热，要注意防暑降温喵~\n"
+                                    elif temp > 25:
+                                        friendly_weather += "天气温暖，可以穿薄一点喵~\n"
+                                    elif temp > 20:
+                                        friendly_weather += "天气舒适，适合外出喵~\n"
+                                    elif temp > 15:
+                                        friendly_weather += "天气有点凉，建议穿外套喵~\n"
+                                    else:
+                                        friendly_weather += "天气较冷，记得多穿衣服喵~\n"
+                                        
+                                    if now['text'] in ['雨', '小雨', '中雨', '大雨', '暴雨']:
+                                        friendly_weather += "今天有雨，记得带伞喵~\n"
+                                    elif now['text'] in ['雪', '小雪', '中雪', '大雪', '暴雪']:
+                                        friendly_weather += "今天下雪了，要注意保暖喵~\n"
+                                        
+                                    friendly_weather += f"更新时间：{now['obsTime']}喵~\n\n"
+                                    
+                                    # 添加完整的天气数据
+                                    friendly_weather += f"当前天气：{now['text']}。\n"
+                                    friendly_weather += f"温度：{now['temp']}°C。\n"
+                                    friendly_weather += f"体感温度：{now['feelsLike']}°C。\n"
+                                    friendly_weather += f"湿度：{now['humidity']}%。\n"
+                                    friendly_weather += f"风向：{now['windDir']}。\n"
+                                    friendly_weather += f"风力等级：{now['windScale']}级。\n"
+                                    friendly_weather += f"风速：{now['windSpeed']}km/h。\n"
+                                    friendly_weather += f"降水量：{now['precip']}mm。\n"
+                                    friendly_weather += f"气压：{now['pressure']}hPa。\n"
+                                    friendly_weather += f"能见度：{now['vis']}km。\n"
+                                    friendly_weather += f"云量：{now.get('cloud', 'N/A')}%。\n"
+                                    friendly_weather += f"露点温度：{now.get('dew', 'N/A')}°C。\n"
+                                    friendly_weather += f"更新时间：{now['obsTime']}。"
+                                    
+                                    logger.info(f"天气查询结果: {friendly_weather}")
+                                    return friendly_weather
                                 else:
                                     error_msg = data.get('message', '未知错误')
                                     logger.error(f"API返回错误: {data['code']} - {error_msg}")
-                                    return f"获取天气信息失败：{data['code']} - {error_msg}"
+                                    return f"喵~抱歉，获取天气信息时出现错误：{data['code']} - {error_msg}喵~"
                             except json.JSONDecodeError as e:
                                 logger.error(f"解析API响应失败: {str(e)}, 响应内容: {response_text}")
-                                return f"解析天气数据失败：{str(e)}"
+                                return f"喵~抱歉，解析天气数据时出现错误：{str(e)}喵~"
                         else:
                             logger.error(f"API请求失败: HTTP {response.status}, 响应内容: {response_text}")
-                            return f"请求天气API失败：HTTP {response.status}"
+                            return f"喵~抱歉，请求天气API失败：HTTP {response.status}喵~"
                 except asyncio.TimeoutError:
                     logger.error("API请求超时")
-                    return "请求天气API超时，请稍后重试"
+                    return "喵~抱歉，请求天气API超时了，请稍后再试喵~"
                 except aiohttp.ClientError as e:
                     logger.error(f"网络连接错误: {str(e)}")
-                    return f"网络连接错误：{str(e)}"
+                    return f"喵~抱歉，网络连接出现错误：{str(e)}喵~"
         except Exception as e:
             logger.error(f"查询天气时发生错误：{str(e)}", exc_info=True)
-            return f"查询天气时发生错误：{str(e)}"
+            return f"喵~抱歉，查询天气时发生错误：{str(e)}喵~"
     
     async def process_message(self, message: str) -> str:
         """处理用户输入的消息

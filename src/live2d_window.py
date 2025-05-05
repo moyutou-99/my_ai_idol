@@ -1762,12 +1762,12 @@ class ChatWindow(QWidget):
         
     def add_message(self, sender, message):
         """添加消息到聊天区域"""
+        # 将换行符替换为HTML换行
+        message = message.replace('\n', '<br>')
         # 格式化消息，设置角色名称颜色为 #514485
         formatted_message = f'<b><span style="color: #514485; font-size: {self.font_size}px;">{sender}：</span></b><span style="font-size: {self.font_size}px;">{message}</span><br>'
-        
         # 添加消息
         self.chat_area.append(formatted_message)
-        
         # 滚动到底部
         self.chat_area.verticalScrollBar().setValue(
             self.chat_area.verticalScrollBar().maximum()
