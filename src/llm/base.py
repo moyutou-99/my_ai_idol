@@ -538,7 +538,7 @@ class BaseLLM(ABC):
             else:
                 result = await tool_func(**parameters)
             
-            logger.info(f"工具执行完成，结果: {result}")
+            #logger.info(f"工具执行完成，结果: {result}")
             return str(result)
             
         except json.JSONDecodeError as e:
@@ -564,7 +564,7 @@ class BaseLLM(ABC):
                 logger.info("检测到JSON格式的工具调用")
                 # 尝试解析JSON格式的工具调用
                 tool_result = await self._process_tool_call(response)
-                logger.info(f"JSON工具调用处理完成，结果: {tool_result}")
+                #logger.info(f"JSON工具调用处理完成，结果: {tool_result}")
                 return tool_result
             except Exception as e:
                 logger.warning(f"JSON工具调用解析失败: {str(e)}")
@@ -578,7 +578,7 @@ class BaseLLM(ABC):
             logger.info(f"提取到的工具调用内容: {tool_call}")
             # 处理工具调用
             tool_result = await self._process_tool_call(tool_call)
-            logger.info(f"XML工具调用处理完成，结果: {tool_result}")
+            #logger.info(f"XML工具调用处理完成，结果: {tool_result}")
             # 替换工具调用为结果
             response = response.replace(tool_call_match.group(0), tool_result)
         

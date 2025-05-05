@@ -56,7 +56,7 @@ class Level1Agent(BaseAgent):
             async with aiohttp.ClientSession() as session:
                 async with session.get(url, params=params, headers=headers, timeout=10) as response:
                     response_text = await response.text()
-                    logger.info(f"城市搜索API响应: {response_text}")
+                    #logger.info(f"城市搜索API响应: {response_text}")
                     
                     if response.status == 200:
                         data = await response.json()
@@ -125,7 +125,7 @@ class Level1Agent(BaseAgent):
                 try:
                     async with session.get(url, params=params, headers=headers, timeout=10) as response:
                         response_text = await response.text()
-                        logger.info(f"天气API响应: {response_text}")
+                        #logger.info(f"天气API响应: {response_text}")
                         
                         if response.status == 200:
                             try:

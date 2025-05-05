@@ -36,6 +36,15 @@ class Live2DModelWidget(QOpenGLWidget):
     # 添加缩放信号
     scaled = pyqtSignal(float)
     
+    _instance = None
+    
+    @classmethod
+    def get_instance(cls):
+        """获取窗口实例"""
+        if cls._instance is None:
+            cls._instance = cls()
+        return cls._instance
+    
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowFlags(Qt.Window | Qt.Tool | Qt.WindowStaysOnTopHint | Qt.FramelessWindowHint)
@@ -49,8 +58,10 @@ class Live2DModelWidget(QOpenGLWidget):
         # Agent等级
         self.current_agent_level = 0  # 默认无Agent
         
-        # 初始化ModelManager
-        self.model_manager = ModelManager()
+        # 初始化ModelManager（单例）
+        self.model_manager = ModelManager.get_instance()
+        logger.info(f"当前ModelManager实例: {id(self.model_manager)}")
+        logger.info(f"当前agent等级: {self.model_manager.current_agent_level}")
         
         # 缩放相关参数
         self.scale_factor = 1.0  # 当前缩放比例
@@ -73,7 +84,7 @@ class Live2DModelWidget(QOpenGLWidget):
         self.systemScale = QGuiApplication.primaryScreen().devicePixelRatio()
         
         # 眼睛追随控制
-        self.eye_follow_enabled = True  # 眼睛追随功能开关
+        self.eye_follow_enabled = True
         
         # 点击区域设置
         self.click_area = {
@@ -1062,6 +1073,7 @@ class Live2DModelWidget(QOpenGLWidget):
     def change_agent_level(self, level: int):
         """切换Agent等级"""
         try:
+            logger.info(f"开始切换Agent等级为: {level}")
             # 更新当前agent等级
             self.current_agent_level = level
             
@@ -1072,7 +1084,7 @@ class Live2DModelWidget(QOpenGLWidget):
             agent = factory.create_agent(level)
             
             # 设置到ModelManager中
-            if hasattr(self, 'model_manager'):
+            if self.model_manager:
                 self.model_manager.set_agent_level(level)
                 logger.info(f"已切换到 {level} 级Agent")
             else:

@@ -39,6 +39,21 @@ class LocalLLM(BaseLLM):
         self.tokenizer = None
         self.history = []
         self.current_agent = None
+        self.current_agent_level = 0  # 添加当前agent等级记录
+        logger.info("LocalLLM初始化完成")
+        
+    def set_agent_level(self, level: int) -> None:
+        """设置当前agent等级
+        
+        Args:
+            level: agent等级（0-3）
+        """
+        logger.info(f"设置LocalLLM的agent等级为: {level}")
+        self.current_agent_level = level  # 记录当前agent等级
+        self.current_agent = self.agent_factory.create_agent(level)
+        logger.info(f"当前agent状态: {self.current_agent is not None}")
+        if self.current_agent:
+            logger.info(f"当前agent类型: {self.current_agent.__class__.__name__}")
         
     def _log_memory_usage(self, stage: str):
         """记录显存使用情况"""
@@ -127,13 +142,25 @@ class LocalLLM(BaseLLM):
                 logger.exception("详细错误信息：")
                 raise
             
-    async def chat(self, message: str, require_agent: bool = False) -> str:
-        """生成回复"""
+    async def chat(self, message: str, require_agent: bool = None) -> str:
+        """生成回复
+        
+        Args:
+            message: 用户输入
+            require_agent: 是否要求使用agent，如果为None则根据当前agent等级决定
+        """
         try:
             # 确保模型已加载
             await self.load_model()
             
+            # 如果require_agent为None，则根据当前agent等级决定
+            if require_agent is None:
+                require_agent = self.current_agent_level > 0
+                logger.info(f"根据当前agent等级({self.current_agent_level})设置require_agent为: {require_agent}")
+            
             logger.info(f"开始处理聊天消息，输入长度: {len(message)}")
+            logger.info(f"当前agent状态: {self.current_agent is not None}")
+            logger.info(f"require_agent参数: {require_agent}")
             self._log_memory_usage("生成回复前")
 
             # 更新对话历史
@@ -146,7 +173,8 @@ class LocalLLM(BaseLLM):
             if self.current_agent is not None or require_agent:
                 logger.info("当前有agent或require_agent为True，准备添加工具提示词")
                 tools_prompt = self._get_tools_prompt()
-                logger.info(f"工具提示词: {tools_prompt}")
+                #logger.info(f"
+                # : {tools_prompt}")
                 prompt = f"{tools_prompt}\n\n{base_prompt}"
             else:
                 logger.info("当前没有agent且require_agent为False，使用基础提示词")
@@ -175,11 +203,11 @@ class LocalLLM(BaseLLM):
                 if self.current_agent is not None or require_agent:
                     logger.info("开始处理工具调用")
                     response = await self._process_response(response)
-                    logger.info(f"工具调用处理完成，结果: {response}")
+                    #logger.info(f"工具调用处理完成，结果: {response}")
                 
                 # 使用LLMConfig处理输出
                 formatted_response = LLMConfig.process_output(response)
-                logger.info(f"格式化后的回复: {formatted_response}")
+                #logger.info(f"格式化后的回复: {formatted_response}")
                 
                 # 更新对话历史
                 self.history.append({"role": "assistant", "content": formatted_response})
@@ -218,7 +246,7 @@ class LocalLLM(BaseLLM):
             if self.current_agent is not None or require_agent:
                 logger.info("当前有agent或require_agent为True，准备添加工具提示词")
                 tools_prompt = self._get_tools_prompt()
-                logger.info(f"工具提示词: {tools_prompt}")
+                #logger.info(f"工具提示词: {tools_prompt}")
                 formatted_prompt = f"{tools_prompt}\n\n{base_prompt}"
             else:
                 logger.info("当前没有agent且require_agent为False，使用基础提示词")
@@ -236,7 +264,7 @@ class LocalLLM(BaseLLM):
                 if self.current_agent is not None or require_agent:
                     logger.info("开始处理工具调用")
                     formatted_content = await self._process_response(formatted_content)
-                    logger.info(f"工具调用处理完成，结果: {formatted_content}")
+                    #logger.info(f"工具调用处理完成，结果: {formatted_content}")
                 
                 yield formatted_content, current_emotion
             

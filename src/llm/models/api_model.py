@@ -13,6 +13,9 @@ class ApiLLM(BaseLLM):
         super().__init__()  # 调用父类的初始化方法
         self.api_type = api_type
         self.api_key = api_key
+        self.current_agent_level = 0  # 添加当前agent等级记录
+        logger.info(f"ApiLLM初始化完成，API类型: {api_type}")
+        logger.info(f"当前agent等级: {self.current_agent_level}")
         
         # 设置API端点
         if api_type == "deepseek":
@@ -25,9 +28,31 @@ class ApiLLM(BaseLLM):
             "Content-Type": "application/json"
         }
         
-    async def chat(self, prompt: str, require_agent: bool = False, **kwargs) -> str:
+    def set_agent_level(self, level: int) -> None:
+        """设置当前agent等级
+        
+        Args:
+            level: agent等级（0-3）
+        """
+        logger.info(f"设置ApiLLM的agent等级为: {level}")
+        self.current_agent_level = level  # 记录当前agent等级
+        self.current_agent = self.agent_factory.create_agent(level)
+        logger.info(f"当前agent状态: {self.current_agent is not None}")
+        if self.current_agent:
+            logger.info(f"当前agent类型: {self.current_agent.__class__.__name__}")
+        
+    async def chat(self, prompt: str, require_agent: bool = None, **kwargs) -> str:
         """生成回复"""
         try:
+            # 如果require_agent为None，则根据当前agent等级决定
+            if require_agent is None:
+                require_agent = self.current_agent_level > 0
+                logger.info(f"根据当前agent等级({self.current_agent_level})设置require_agent为: {require_agent}")
+            
+            logger.info(f"开始处理聊天消息，输入长度: {len(prompt)}")
+            logger.info(f"当前agent状态: {self.current_agent is not None}")
+            logger.info(f"require_agent参数: {require_agent}")
+            
             async with aiohttp.ClientSession() as session:
                 # 构建基础提示词
                 base_prompt = LLMConfig.format_prompt(prompt)
@@ -36,7 +61,7 @@ class ApiLLM(BaseLLM):
                 if self.current_agent is not None or require_agent:
                     logger.info("当前有agent或require_agent为True，准备添加工具提示词")
                     tools_prompt = self._get_tools_prompt()
-                    logger.info(f"工具提示词: {tools_prompt}")
+                    #logger.info(f"工具提示词: {tools_prompt}")
                     formatted_prompt = f"{tools_prompt}\n\n{base_prompt}"
                 else:
                     logger.info("当前没有agent且require_agent为False，使用基础提示词")
@@ -78,7 +103,7 @@ class ApiLLM(BaseLLM):
                         if self.current_agent is not None or require_agent:
                             logger.info("开始处理工具调用")
                             content = await self._process_response(content)
-                            logger.info(f"工具调用处理完成，结果: {content}")
+                            #logger.info(f"工具调用处理完成，结果: {content}")
                             
                         # 使用LLMConfig处理输出
                         formatted_response = LLMConfig.process_output(content)
@@ -99,9 +124,18 @@ class ApiLLM(BaseLLM):
         except Exception as e:
             raise Exception(f"API调用失败: {str(e)}")
             
-    async def stream_chat(self, prompt: str, require_agent: bool = False, **kwargs):
+    async def stream_chat(self, prompt: str, require_agent: bool = None, **kwargs):
         """流式生成回复"""
         try:
+            # 如果require_agent为None，则根据当前agent等级决定
+            if require_agent is None:
+                require_agent = self.current_agent_level > 0
+                logger.info(f"根据当前agent等级({self.current_agent_level})设置require_agent为: {require_agent}")
+            
+            logger.info(f"开始流式处理聊天消息，输入长度: {len(prompt)}")
+            logger.info(f"当前agent状态: {self.current_agent is not None}")
+            logger.info(f"require_agent参数: {require_agent}")
+            
             async with aiohttp.ClientSession() as session:
                 # 构建基础提示词
                 base_prompt = LLMConfig.format_prompt(prompt)
@@ -110,7 +144,7 @@ class ApiLLM(BaseLLM):
                 if self.current_agent is not None or require_agent:
                     logger.info("当前有agent或require_agent为True，准备添加工具提示词")
                     tools_prompt = self._get_tools_prompt()
-                    logger.info(f"工具提示词: {tools_prompt}")
+                    #logger.info(f"工具提示词: {tools_prompt}")
                     formatted_prompt = f"{tools_prompt}\n\n{base_prompt}"
                 else:
                     logger.info("当前没有agent且require_agent为False，使用基础提示词")
@@ -158,7 +192,7 @@ class ApiLLM(BaseLLM):
                                                 if self.current_agent is not None or require_agent:
                                                     logger.info("开始处理工具调用")
                                                     content = await self._process_response(content)
-                                                    logger.info(f"工具调用处理完成，结果: {content}")
+                                                    #logger.info(f"工具调用处理完成，结果: {content}")
                                                 # 使用LLMConfig处理流式输出
                                                 formatted_content, current_emotion = await LLMConfig.process_stream_output(content, current_emotion)
                                                 yield formatted_content, current_emotion
@@ -172,7 +206,7 @@ class ApiLLM(BaseLLM):
                                                 if self.current_agent is not None or require_agent:
                                                     logger.info("开始处理工具调用")
                                                     content = await self._process_response(content)
-                                                    logger.info(f"工具调用处理完成，结果: {content}")
+                                                    #logger.info(f"工具调用处理完成，结果: {content}")
                                                 # 使用LLMConfig处理流式输出
                                                 formatted_content, current_emotion = await LLMConfig.process_stream_output(content, current_emotion)
                                                 yield formatted_content, current_emotion

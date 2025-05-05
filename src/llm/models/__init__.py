@@ -6,12 +6,25 @@ import logging
 logger = logging.getLogger(__name__)
 
 class ModelManager:
+    _instance = None
+    
+    @classmethod
+    def get_instance(cls, *args, **kwargs):
+        """获取ModelManager实例"""
+        if cls._instance is None:
+            cls._instance = cls(*args, **kwargs)
+        return cls._instance
+    
     def __init__(self, 
                  local_model_path: str = "Voice_models/Qwen2.5-1.5B-Instruct", 
                  deepseek_api_key: str = None,
                  ph_api_key: str = None,
                  device: str = "cuda" if torch.cuda.is_available() else "cpu",
                  torch_dtype: torch.dtype = torch.float16 if torch.cuda.is_available() else torch.float32):
+        if ModelManager._instance is not None:
+            logger.warning("ModelManager已经初始化，将返回现有实例")
+            return
+            
         self.local_model = LocalLLM(
             model_path=local_model_path,
             device=device,
@@ -21,6 +34,11 @@ class ModelManager:
         self.ph_model = ApiLLM(api_type="ph", api_key=ph_api_key) if ph_api_key else None
         self.memory_monitor = MemoryMonitor()
         self.current_model = "local"  # 默认使用本地模型
+        self.current_agent_level = 0  # 添加当前agent等级记录
+        logger.info("ModelManager初始化完成")
+        logger.info(f"当前agent等级: {self.current_agent_level}")
+        
+        ModelManager._instance = self
         
     async def switch_model(self, model_name: str):
         """切换模型"""
@@ -46,10 +64,14 @@ class ModelManager:
         Args:
             level: agent等级（0-3）
         """
+        logger.info(f"开始设置agent等级为: {level}")
+        self.current_agent_level = level  # 记录当前agent等级
+        
         # 同步设置所有模型实例的agent
         if self.local_model:
             self.local_model.set_agent_level(level)
             logger.info(f"已设置本地模型的agent等级为: {level}")
+            logger.info(f"当前agent状态: {self.local_model.current_agent is not None}")
             
         if self.deepseek_model:
             self.deepseek_model.set_agent_level(level)
@@ -73,12 +95,24 @@ class ModelManager:
         else:
             logger.info("当前没有agent")
         
-    async def get_response(self, prompt: str, require_agent: bool = False) -> str:
-        """获取模型回复"""
+    async def get_response(self, prompt: str, require_agent: bool = None) -> str:
+        """获取模型回复
+        
+        Args:
+            prompt: 用户输入
+            require_agent: 是否要求使用agent，如果为None则根据当前agent等级决定
+        """
         try:
+            # 如果require_agent为None，则根据当前agent等级决定
+            if require_agent is None:
+                require_agent = self.current_agent_level > 0
+                logger.info(f"根据当前agent等级({self.current_agent_level})设置require_agent为: {require_agent}")
+            
+            logger.info(f"开始获取回复，require_agent参数: {require_agent}")
             # 检查当前agent状态
             if self.current_model == "local":
                 current_agent = self.local_model.current_agent
+                logger.info(f"当前agent状态: {current_agent is not None}")
             elif self.current_model == "deepseek" and self.deepseek_model:
                 current_agent = self.deepseek_model.current_agent
             elif self.current_model == "ph" and self.ph_model:

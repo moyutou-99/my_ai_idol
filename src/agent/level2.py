@@ -23,6 +23,10 @@ class Level2Agent(Level1Agent):
         Returns:
             str: AI的回复
         """
+        # 先尝试使用父类的功能
+        result = await super().process_message(message)
+        if result != f"1级agent收到消息：{message}":
+            return result
         return f"2级agent收到消息：{message}"
     
     async def initialize(self) -> None:
