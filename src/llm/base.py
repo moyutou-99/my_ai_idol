@@ -500,12 +500,12 @@ class BaseLLM(ABC):
         
         return self.tool_prompt.format(tools="\n".join(tool_descriptions))
     
-    async def _process_tool_call(self, tool_call: str) -> str:
+    async def _process_tool_call(self, tool_call: str, user_message: str = None) -> str:
         """处理工具调用
         
         Args:
             tool_call: 工具调用字符串
-            
+            user_message: 用户原始输入
         Returns:
             str: 工具执行结果
         """
@@ -515,32 +515,35 @@ class BaseLLM(ABC):
             tool_data = json.loads(tool_call)
             tool_name = tool_data["tool"]
             parameters = tool_data["parameters"]
-            
+
+            # 如果是文件打开工具，强制用用户原始输入作为filename参数
+            if tool_name == "search_and_open_desktop_file" and user_message:
+                # 提取关键词
+                for kw in ["打开", "启动", "运行", "搜索"]:
+                    if user_message.startswith(kw):
+                        filename = user_message[len(kw):].strip()
+                        logger.info(f"[BaseLLM] 强制将工具参数filename替换为用户输入: {filename}")
+                        parameters["filename"] = filename
+                        break
+
             logger.info(f"解析工具调用 - 工具名称: {tool_name}, 参数: {parameters}")
-            
             # 获取工具函数
             if self.current_agent is None:
                 logger.error("当前没有可用的agent")
                 return "错误：当前没有可用的agent"
-                
             tool_func = self.current_agent.get_tool(tool_name)
             if tool_func is None:
                 logger.error(f"找不到工具: {tool_name}")
                 return f"错误：找不到工具 {tool_name}"
-            
             logger.info(f"开始执行工具: {tool_name}")
             # 调用工具
             if tool_name == "get_weather":
-                # 特殊处理天气查询
                 location = parameters.get("location", None)
                 logger.info(f"执行天气查询，地点: {location}")
                 result = await self.current_agent.process_message(f"{location}的天气" if location else "天气")
             else:
                 result = await tool_func(**parameters)
-            
-            #logger.info(f"工具执行完成，结果: {result}")
             return str(result)
-            
         except json.JSONDecodeError as e:
             logger.error(f"工具调用格式错误: {tool_call}, 错误: {str(e)}")
             return f"工具调用格式错误：{tool_call}"
@@ -548,12 +551,12 @@ class BaseLLM(ABC):
             logger.error(f"工具调用错误: {str(e)}", exc_info=True)
             return f"工具调用错误：{str(e)}"
     
-    async def _process_response(self, response: str) -> str:
+    async def _process_response(self, response: str, user_message: str = None) -> str:
         """处理LLM的响应，包括工具调用
         
         Args:
             response: LLM的原始响应
-            
+            user_message: 用户原始输入
         Returns:
             str: 处理后的响应
         """
@@ -563,25 +566,18 @@ class BaseLLM(ABC):
             try:
                 logger.info("检测到JSON格式的工具调用")
                 # 尝试解析JSON格式的工具调用
-                tool_result = await self._process_tool_call(response)
-                #logger.info(f"JSON工具调用处理完成，结果: {tool_result}")
+                tool_result = await self._process_tool_call(response, user_message)
                 return tool_result
             except Exception as e:
                 logger.warning(f"JSON工具调用解析失败: {str(e)}")
                 pass
-                
         tool_call_match = re.search(r'<tool_call>(.*?)</tool_call>', response, re.DOTALL)
         if tool_call_match:
             logger.info("检测到XML格式的工具调用")
-            # 提取工具调用部分
             tool_call = tool_call_match.group(1).strip()
             logger.info(f"提取到的工具调用内容: {tool_call}")
-            # 处理工具调用
-            tool_result = await self._process_tool_call(tool_call)
-            #logger.info(f"XML工具调用处理完成，结果: {tool_result}")
-            # 替换工具调用为结果
+            tool_result = await self._process_tool_call(tool_call, user_message)
             response = response.replace(tool_call_match.group(0), tool_result)
-        
         logger.info(f"响应处理完成，最终结果: {response}")
         return response
     
