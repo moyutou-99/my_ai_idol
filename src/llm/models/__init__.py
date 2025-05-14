@@ -30,8 +30,24 @@ class ModelManager:
             device=device,
             torch_dtype=torch_dtype
         )
-        self.deepseek_model = ApiLLM(api_type="deepseek", api_key=deepseek_api_key) if deepseek_api_key else None
-        self.ph_model = ApiLLM(api_type="ph", api_key=ph_api_key) if ph_api_key else None
+        
+        # 初始化API模型
+        self.deepseek_model = None
+        self.ph_model = None
+        if deepseek_api_key:
+            try:
+                self.deepseek_model = ApiLLM(api_type="deepseek", api_key=deepseek_api_key)
+                logger.info("Deepseek API模型初始化成功")
+            except Exception as e:
+                logger.error(f"Deepseek API模型初始化失败: {e}")
+                
+        if ph_api_key:
+            try:
+                self.ph_model = ApiLLM(api_type="ph", api_key=ph_api_key)
+                logger.info("PH API模型初始化成功")
+            except Exception as e:
+                logger.error(f"PH API模型初始化失败: {e}")
+                
         self.memory_monitor = MemoryMonitor()
         self.current_model = "local"  # 默认使用本地模型
         self.current_agent_level = 0  # 添加当前agent等级记录
@@ -48,9 +64,15 @@ class ModelManager:
         if model_name == self.current_model:
             return
             
+        # 检查API模型是否可用
+        if model_name == "deepseek" and not self.deepseek_model:
+            raise ValueError("Deepseek API模型未初始化或初始化失败")
+        elif model_name == "ph" and not self.ph_model:
+            raise ValueError("PH API模型未初始化或初始化失败")
+            
         # 切换到新模型
         self.current_model = model_name
-        print(f"已切换到{model_name}模型")
+        logger.info(f"已切换到{model_name}模型")
         
         # 如果是本地模型且未加载，则加载模型
         if model_name == "local" and not self.local_model.is_loaded():

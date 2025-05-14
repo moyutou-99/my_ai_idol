@@ -12,13 +12,41 @@ import pytz
 from lunar_python import Lunar, Solar
 import re
 from dateutil.relativedelta import relativedelta
+import yaml
 
-# 和风天气API配置
-QWEATHER_API_KEY = "34514d19027043b0bc94328982b590ae"  # 和风天气API Key
-QWEATHER_API_HOST = "https://np3p3xu9gx.re.qweatherapi.com"  # API Host
-QWEATHER_LOCATION_ID = "101010100"  # 默认城市ID（北京）
-QWEATHER_LANG = "zh"  # 语言设置
-QWEATHER_UNIT = "m"  # 单位设置（m: 公制，i: 英制）
+# 加载配置文件
+def load_config():
+    """加载配置文件
+    
+    Returns:
+        dict: 配置字典
+        
+    Raises:
+        FileNotFoundError: 配置文件不存在
+        yaml.YAMLError: 配置文件格式错误
+    """
+    try:
+        with open('config.yaml', 'r', encoding='utf-8') as f:
+            config = yaml.safe_load(f)
+            if not config:
+                raise ValueError("配置文件为空")
+            return config
+    except FileNotFoundError:
+        logger.error("配置文件不存在")
+        raise
+    except yaml.YAMLError as e:
+        logger.error(f"配置文件格式错误: {e}")
+        raise
+    except Exception as e:
+        logger.error(f"加载配置文件失败: {e}")
+        raise
+
+# 加载配置
+try:
+    config = load_config()
+except Exception as e:
+    logger.error(f"初始化配置失败: {e}")
+    raise
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +58,26 @@ class Level1Agent(BaseAgent):
         print("已切换至1级agent，当前可用功能有：天气查询，时间查询，日历事件查询等")
         self.location_cache = {}  # 城市ID缓存
         self.timezone = pytz.timezone('Asia/Shanghai')  # 默认时区
+        
+        # 从配置文件加载和风天气API配置
+        self.qweather_config = config.get('qweather', {})
+        if not self.qweather_config:
+            raise ValueError("配置文件中缺少和风天气API配置")
+            
+        # 获取必需的配置项
+        self.qweather_api_key = self.qweather_config.get('api_key')
+        self.qweather_api_host = self.qweather_config.get('api_host')
+        self.qweather_default_location_id = self.qweather_config.get('default_location_id')
+        
+        # 验证必需的配置项
+        if not all([self.qweather_api_key, self.qweather_api_host, self.qweather_default_location_id]):
+            raise ValueError("和风天气API配置不完整，请检查配置文件中的api_key、api_host和default_location_id")
+            
+        # 获取可选配置项，设置默认值
+        self.qweather_lang = self.qweather_config.get('language', 'zh')
+        self.qweather_unit = self.qweather_config.get('unit', 'm')
+        
+        logger.info("和风天气API配置加载成功")
         
         # 时间查询关键词配置
         self.time_patterns = {
@@ -115,11 +163,11 @@ class Level1Agent(BaseAgent):
         """
         try:
             logger.info(f"开始搜索城市: {city_name}")
-            url = f"{QWEATHER_API_HOST}/geo/v2/city/lookup"
+            url = f"{self.qweather_api_host}/geo/v2/city/lookup"
             params = {
                 "location": city_name,
-                "key": QWEATHER_API_KEY,
-                "lang": QWEATHER_LANG
+                "key": self.qweather_api_key,
+                "lang": self.qweather_lang
             }
             
             logger.info(f"城市搜索请求参数: {params}")
@@ -131,7 +179,6 @@ class Level1Agent(BaseAgent):
             async with aiohttp.ClientSession() as session:
                 async with session.get(url, params=params, headers=headers, timeout=10) as response:
                     response_text = await response.text()
-                    #logger.info(f"城市搜索API响应: {response_text}")
                     
                     if response.status == 200:
                         data = await response.json()
@@ -160,7 +207,7 @@ class Level1Agent(BaseAgent):
         try:
             logger.info(f"开始查询天气，地点: {location}")
             # 获取城市ID
-            location_id = QWEATHER_LOCATION_ID
+            location_id = self.qweather_default_location_id
             if location:
                 logger.info(f"尝试获取城市ID，当前缓存: {self.location_cache}")
                 # 检查缓存
@@ -181,12 +228,12 @@ class Level1Agent(BaseAgent):
             
             logger.info(f"使用城市ID查询天气: {location_id}")
             # 构建请求URL
-            url = f"{QWEATHER_API_HOST}/v7/weather/now"
+            url = f"{self.qweather_api_host}/v7/weather/now"
             params = {
                 "location": location_id,
-                "key": QWEATHER_API_KEY,
-                "lang": QWEATHER_LANG,
-                "unit": QWEATHER_UNIT
+                "key": self.qweather_api_key,
+                "lang": self.qweather_lang,
+                "unit": self.qweather_unit
             }
             
             logger.info(f"天气查询请求参数: {params}")

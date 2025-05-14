@@ -4,6 +4,15 @@ from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtGui import QIcon, QFont
 from .auth_manager import AuthManager
 import os
+import yaml
+
+def load_config():
+    try:
+        with open('config.yaml', 'r', encoding='utf-8') as f:
+            return yaml.safe_load(f)
+    except Exception as e:
+        print(f"加载配置文件失败: {e}")
+        return {}
 
 class LoginDialog(QDialog):
     login_success = pyqtSignal(dict)
@@ -11,11 +20,12 @@ class LoginDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.auth_manager = AuthManager()
+        self.config = load_config()
         # 隐藏默认帮助按钮
         self.setWindowFlags(self.windowFlags() & ~Qt.WindowContextHelpButtonHint)
         # 设置窗口图标
         icon_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 
-                               'assets', 'icons', '9.png')
+                               self.config.get('ui', {}).get('icon_path', 'assets/icons/9.png'))
         self.setWindowIcon(QIcon(icon_path))
         self.init_ui()
         

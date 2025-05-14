@@ -1,0 +1,64 @@
+# 应用程序配置
+
+# 界面设置
+ui:
+  show_login_dialog: false  # 是否显示登录界面，false为不显示，true为显示
+  icon_path: "assets/icons/9.png"  # 应用程序图标路径
+
+# LLM设置
+llm:
+  # 本地模型配置  
+  local_model_path: "Voice_models/Qwen2.5-1.5B-Instruct"  # 本地模型路径
+  
+  # API配置
+  deepseek_api_key: "sk-af272593e5f14b049b9ac6b3bfe75b43"  # 深度求索API Key
+  ph_api_key: "sk-jBWhM4xVWTRGl74NriZjFMSrxsouEEPqtFCSA0eenG0rWdEV"  # 幻日API Key
+  
+  # 模型参数
+  max_tokens: 512      # 最大生成token数：模型生成回复时的最大token数量
+  temperature: 0.7     # 温度：控制生成文本的随机性，值越高随机性越大
+  top_p: 0.9           # Top P：控制生成文本的多样性，值越高多样性越大
+
+  # 显存配置
+  memory_threshold: 2.5  # 显存阈值：低于该值时，模型会自动切换到低显存模式
+  warning_threshold: 3.0  # 显存警告阈值：低于该值时，模型会发出警告
+
+# Live2D设置
+live2d:
+  model_path: "live2d/live2d_model/林久久2.0q版/林久久2.0q版.model3.json"  # Live2D模型路径
+  expressions:
+    normal:
+      name: "normal"
+      parameters:
+        - id: "ParamEyeLOpen"
+          value: 1    # 眼睛完全睁开
+        - id: "ParamEyeROpen"
+          value: 1    # 眼睛完全睁开
+        - id: "ParamBrowLY"
+          value: 0    # 眉毛在中间位置
+        - id: "ParamBrowRY"
+          value: 0    # 眉毛在中间位置
+        - id: "ParamMouthForm"
+          value: 0    # 嘴巴中性表情
+    happy:
+      name: "happy"
+      parameters:
+        - id: "ParamEyeLOpen"
+          value: 0.8  # 眼睛稍微眯起
+        - id: "ParamEyeROpen"
+          value: 0.8  # 眼睛稍微眯起
+        - id: "ParamBrowLY"
+          value: 0.2  # 眉毛稍微上扬
+        - id: "ParamBrowRY"
+          value: 0.2  # 眉毛稍微上扬
+        - id: "ParamMouthForm"
+          value: 1    # 嘴角上扬，形成微笑
+
+# 和风天气API设置
+qweather:
+  api_key: "34514d19027043b0bc94328982b590ae"  # 和风天气API Key
+  api_host: "https://np3p3xu9gx.re.qweatherapi.com"  # API Host
+  default_location_id: "101010100"  # 默认城市ID（北京）
+  language: "zh"  # 语言设置
+  unit: "m"  # 单位设置（m: 公制，i: 英制）
+

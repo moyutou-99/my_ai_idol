@@ -622,19 +622,19 @@ class Live2DModelWidget(QOpenGLWidget):
         local_model_action = QAction("本地模型", self)
         local_model_action.setCheckable(True)
         local_model_action.setChecked(self.current_model == "local")
-        local_model_action.triggered.connect(lambda: self.switch_model("local"))
+        local_model_action.triggered.connect(lambda: asyncio.create_task(self.switch_model("local")))
         model_menu.addAction(local_model_action)
         
         deepseek_model_action = QAction("D老师", self)
         deepseek_model_action.setCheckable(True)
         deepseek_model_action.setChecked(self.current_model == "deepseek")
-        deepseek_model_action.triggered.connect(lambda: self.switch_model("deepseek"))
+        deepseek_model_action.triggered.connect(lambda: asyncio.create_task(self.switch_model("deepseek")))
         model_menu.addAction(deepseek_model_action)
         
         ph_model_action = QAction("幻日-施工中，暂不可用", self)
         ph_model_action.setCheckable(True)
         ph_model_action.setChecked(self.current_model == "ph")
-        ph_model_action.triggered.connect(lambda: self.switch_model("ph"))
+        ph_model_action.triggered.connect(lambda: asyncio.create_task(self.switch_model("ph")))
         model_menu.addAction(ph_model_action)
         
         menu.addSeparator()
@@ -1058,17 +1058,26 @@ class Live2DModelWidget(QOpenGLWidget):
         self.speech_bubble.update_position(self.pos(), self.size())
         self.speech_timer.start(duration)
 
-    def switch_model(self, model_name):
+    async def switch_model(self, model_name):
         """切换模型"""
         if model_name == self.current_model:
             return
             
-        self.current_model = model_name
-        self.model_manager.switch_model(model_name)
-        
-        # 更新状态栏显示
-        if hasattr(self, 'status_bar'):
-            self.status_bar.showMessage(f"已切换到{model_name}模型", 3000)
+        try:
+            # 切换到新模型
+            await self.model_manager.switch_model(model_name)
+            self.current_model = model_name
+            
+            # 更新状态栏显示
+            if hasattr(self, 'status_bar'):
+                self.status_bar.showMessage(f"已切换到{model_name}模型", 3000)
+                
+            logger.info(f"成功切换到{model_name}模型")
+        except Exception as e:
+            logger.error(f"切换模型失败: {e}")
+            QMessageBox.warning(self, "错误", f"切换模型失败: {str(e)}")
+            # 切换失败时恢复原模型
+            self.current_model = "local"
 
     def change_agent_level(self, level: int):
         """切换Agent等级"""

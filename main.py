@@ -1,5 +1,40 @@
-# 控制是否显示登录界面
-SHOW_LOGIN_DIALOG = False  # True: 显示登录界面, False: 不显示登录界面
+# 导入配置文件
+import yaml
+
+# 加载配置文件
+def load_config():
+    try:
+        with open('config.yaml', 'r', encoding='utf-8') as f:
+            config = yaml.safe_load(f)
+            if not config:
+                raise ValueError("配置文件为空")
+            return config
+    except Exception as e:
+        logger.error(f"加载配置文件失败: {e}")
+        raise
+
+# 加载配置
+config = load_config()
+
+# 验证必要的配置项
+def validate_config():
+    required_configs = {
+        'ui': ['show_login_dialog', 'icon_path'],
+        'live2d': ['model_path']
+    }
+    
+    for section, keys in required_configs.items():
+        if section not in config:
+            raise ValueError(f"配置文件中缺少 {section} 部分")
+        for key in keys:
+            if key not in config[section]:
+                raise ValueError(f"配置文件中缺少 {section}.{key} 配置项")
+
+# 验证配置
+validate_config()
+
+# 获取配置值
+SHOW_LOGIN_DIALOG = config['ui']['show_login_dialog']
 
 import sys
 import os
@@ -116,7 +151,7 @@ async def main():
         app = QApplication(sys.argv)
         
         # 设置应用程序图标
-        icon_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'assets', 'icons', '9.png')
+        icon_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), config['ui']['icon_path'])
         app.setWindowIcon(QIcon(icon_path))
         
         # 创建事件循环
@@ -152,7 +187,7 @@ async def main():
         
         # 加载模型
         current_dir = os.path.dirname(os.path.abspath(__file__))
-        model_path = os.path.join(current_dir, "live2d", "live2d_model", "林久久2.0q版", "林久久2.0q版.model3.json")
+        model_path = os.path.join(current_dir, config['live2d']['model_path'])
         logger.info(f"正在加载模型: {model_path}")
         
         # 确保模型路径存在
